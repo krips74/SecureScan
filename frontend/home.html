@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Advanced Web Vulnerability Scanner</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="landing">
+  <div class="landing">
+    <header class="landing-nav">
+      <div class="landing-nav-inner">
+        <a class="landing-brand" href="/home">
+          <div class="brand-mark"><img src="assets/images/logo.svg" alt="SecureScan"></div>
+          <div>
+            <div class="brand-name">SecureScan</div>
+          </div>
+        </a>
+
+        <div class="landing-actions">
+          <a class="btn btn-secondary" href="/login">Sign in</a>
+          <a class="btn btn-primary" href="/register">Signup</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="landing-main">
+      <section class="landing-hero" id="product">
+        <span class="landing-kicker">ADVANCED WEB SECURITY</span>
+        <h1>SecureScan — Vulnerability Scanner</h1>
+        <div class="landing-subtitle">Run focused scans across common web vulnerabilities with clear evidence and consistent severity tags.</div>
+        <div class="landing-cta">
+          <a class="btn btn-primary" href="/register">Get Started</a>
+        </div>
+      </section>
+
+      <section class="landing-section" id="scanners" style="margin-top: -2rem;">
+        <div class="card tool-card-main">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+            Available Security Tools
+          </div>
+          <div class="tool-grid">
+            <div class="tool-tile" onclick="window.location.href='/scan'">
+              <div class="tool-tile-header">
+                <div class="tool-tile-left">
+                  <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="xss" aria-hidden="true"></span></div>
+                  <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">XSS Scanner</h3></div>
+                </div>
+              </div>
+              <div class="tool-footer"><span>Reflected · Stored · DOM</span><span class="tool-action">Open</span></div>
+            </div>
+
+            <div class="tool-tile" onclick="window.location.href='/sql_injection'">
+              <div class="tool-tile-header">
+                <div class="tool-tile-left">
+                  <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="sqli" aria-hidden="true"></span></div>
+                  <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">SQL Injection</h3></div>
+                </div>
+              </div>
+              <div class="tool-footer"><span>Database exposure</span><span class="tool-action">Open</span></div>
+            </div>
+
+            <div class="tool-tile" onclick="window.location.href='/open_redirect'">
+              <div class="tool-tile-header">
+                <div class="tool-tile-left">
+                  <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="redirect" aria-hidden="true"></span></div>
+                  <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">Open Redirect</h3></div>
+                </div>
+              </div>
+              <div class="tool-footer"><span>URL routing</span><span class="tool-action">Open</span></div>
+            </div>
+
+            <div class="tool-tile" onclick="window.location.href='/cors_scan'">
+              <div class="tool-tile-header">
+                <div class="tool-tile-left">
+                  <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="cors" aria-hidden="true"></span></div>
+                  <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">CORS Tester</h3></div>
+                </div>
+              </div>
+              <div class="tool-footer"><span>CORS policy</span><span class="tool-action">Open</span></div>
+            </div>
+
+            <div class="tool-tile" onclick="window.location.href='/header_scan'">
+              <div class="tool-tile-header">
+                <div class="tool-tile-left">
+                  <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="headers" aria-hidden="true"></span></div>
+                  <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">Header Analysis</h3></div>
+                </div>
+              </div>
+              <div class="tool-footer"><span>Configuration posture</span><span class="tool-action">Open</span></div>
+            </div>
+
+            <div class="tool-tile" onclick="window.location.href='/phishing'">
+              <div class="tool-tile-header">
+                <div class="tool-tile-left">
+                  <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="phishing" aria-hidden="true"></span></div>
+                  <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">Phishing Scanner</h3></div>
+                </div>
+              </div>
+              <div class="tool-footer"><span>URL verification</span><span class="tool-action">Open</span></div>
+            </div>
+
+
+          </div>
+        </div>
+      </section>
+
+      <section class="landing-section landing-center-copy" id="why">
+        <div class="card">
+          <div class="landing-text landing-lead">
+            SecureScan is a focused web application security testing solution designed to help you assess common web risks with clear evidence and consistent severity tags.
+            Use it as a standalone scanner or as a lightweight component in larger security workflows.
+          </div>
+          <div class="landing-text">
+            SecureScan provides built-in checks across multiple vulnerability classes and helps you operationalize scanning with repeatable runs, a scan history view in Reports, and an API-driven backend.
+            By making SecureScan part of your security measures, you can improve your security posture and reduce exposure to common web attacks with a low resource cost.
+          </div>
+        </div>
+      </section>
+
+      <section class="landing-section landing-topic reveal-on-scroll" id="about">
+        <h2 class="landing-h2">Vulnerability Scanning Automation and Integration</h2>
+        <div class="landing-split landing-split-leftshot">
+          <div class="card landing-shot landing-shot-large" style="--shot-bg: url('assets/images/dashboard.png');" aria-label="Dashboard screenshot">
+            <img class="landing-shot-img" src="assets/images/dashboard.png" alt="Dashboard screenshot">
+          </div>
+
+          <div class="card">
+            <div class="landing-text">
+              Get a quick security overview from the dashboard: scans run, vulnerabilities found, high-risk results, and easy access to each security tool.
+              SecureScan is designed for repeatable workflows and structured results you can review in the UI or consume through the backend API (DevSecOps-friendly).
+            </div>
+            <div class="landing-text">Use SecureScan to support your existing workflow:</div>
+            <ul class="landing-bullets">
+              <li>Run scans on demand during development and QA.</li>
+              <li>Review scan history, severity, and details in Reports.</li>
+              <li>Use the backend API to integrate scans into scripted workflows.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="landing-section landing-topic reveal-on-scroll">
+        <h2 class="landing-h2 landing-h2-right">Fast, Accurate, and Scalable Web Vulnerability Scanner</h2>
+        <div class="landing-split landing-split-scan">
+          <div class="card landing-compact-card">
+            <div class="landing-text">
+              SecureScan focuses on practical web vulnerability checks and aims to minimize false positives by favoring verifiable signals and evidence.
+              Run a unified scan to cover multiple checks in one go, then review the saved results in Reports.
+            </div>
+            <ul class="landing-bullets">
+              <li>Coverage across common, high-impact web risk categories.</li>
+              <li>Consistent severity tags to help prioritize remediation.</li>
+              <li>Designed for scanning modern web apps with multiple endpoints.</li>
+            </ul>
+          </div>
+
+          <div class="card landing-shot landing-shot-scan" style="--shot-bg: url('assets/images/scan.png');" aria-label="Scans screenshot">
+            <img class="landing-shot-img" src="assets/images/scan.png" alt="Scans screenshot">
+          </div>
+        </div>
+      </section>
+
+      <section class="landing-section landing-topic reveal-on-scroll">
+        <h2 class="landing-h2">Get Added Value From Your Website Vulnerability Scans</h2>
+        <div class="landing-split landing-split-leftshot">
+          <div class="card landing-shot landing-shot-large" style="--shot-bg: url('assets/images/reports_.png');" aria-label="Reports screenshot">
+            <img class="landing-shot-img" src="assets/images/reports_.png" alt="Reports screenshot">
+          </div>
+
+          <div class="card">
+            <div class="landing-text">
+              The Reports view keeps a history of your runs with severity badges and expandable details, so you can quickly triage what needs attention.
+              In addition to key web application vulnerabilities like SQL Injection and Cross-site Scripting (XSS), SecureScan includes checks for configuration and logic flaws that commonly appear in real-world applications.
+            </div>
+            <ul class="landing-bullets">
+              <li>Coverage across common web vulnerability categories.</li>
+              <li>Scan history + drill-down details via the UI and backend API.</li>
+              <li>Useful for both quick checks and repeatable testing.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="landing-footer" aria-label="Site footer">
+      <div class="landing-footer-inner">
+        <div class="landing-footer-left">
+          <nav class="landing-footer-links" aria-label="Footer links">
+            <a href="/login">Login</a>
+            <a href="#">Subscription Services Agreement</a>
+            <a href="#">Privacy Policy</a>
+            <a href="#">Terms of Use</a>
+            <a href="#">Sitemap</a>
+          </nav>
+          <div class="landing-footer-copy">© SecureScan 2026</div>
+        </div>
+
+        <div class="landing-footer-social" aria-label="Social links">
+          <a class="landing-social" href="#" aria-label="LinkedIn">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+              <path d="M4.98 3.5C4.98 4.88 3.87 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5ZM.5 8h4V23h-4V8ZM8 8h3.83v2.05h.05c.53-1 1.83-2.05 3.77-2.05C19.7 8 22 10.24 22 14.1V23h-4v-7.7c0-1.84-.03-4.2-2.56-4.2-2.56 0-2.95 2-2.95 4.07V23H8V8Z"/>
+            </svg>
+          </a>
+          <a class="landing-social" href="#" aria-label="X">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+              <path d="M18.9 2H22l-6.78 7.75L23.2 22h-6.4l-5.02-6.56L6 22H2.8l7.27-8.31L.4 2h6.56l4.54 5.98L18.9 2Zm-1.12 18h1.72L7.77 3.9H5.92L17.78 20Z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="assets/js/common.js"></script>
+  <script>
+    // If already authenticated, go straight to the dashboard
+    if (localStorage.getItem('ss_token')) {
+      window.location.href = '/dashboard';
+    }
+
+    // Add icons to tool tiles
+    (function initToolTileIcons() {
+      try {
+        const slots = document.querySelectorAll('.tool-tile-icon[data-kind]');
+        for (const slot of slots) {
+          const kind = slot.getAttribute('data-kind') || 'dashboard';
+          if (typeof iconSvg === 'function') slot.appendChild(iconSvg(kind));
+        }
+      } catch (e) {}
+    })();
+
+    // Slow reveal on scroll for landing topics
+    (function initLandingScrollReveal() {
+      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const items = Array.from(document.querySelectorAll('.reveal-on-scroll'));
+      if (!items.length) return;
+
+      if (reduceMotion || !('IntersectionObserver' in window)) {
+        items.forEach(el => el.classList.add('is-revealed'));
+        return;
+      }
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            entry.target.classList.add('is-revealed');
+            observer.unobserve(entry.target);
+          }
+        },
+        {
+          threshold: 0.15,
+          rootMargin: '0px 0px -10% 0px'
+        }
+      );
+
+      items.forEach(el => observer.observe(el));
+    })();
+
+    // Hold fingerprint for 2s to open Sign in
+    (function initFingerprintHoldToSignIn() {
+      const btn = document.querySelector('.landing-fingerprint-btn');
+      if (!btn) return;
+      const img = btn.querySelector('img');
+      if (!img) return;
+      const HOLD_MS = 2000;
+      let timer = null;
+      let isHolding = false;
+
+      function setHoldingUI(on) {
+        btn.classList.toggle('is-holding', !!on);
+      }
+
+      function clearHold() {
+        if (timer) window.clearTimeout(timer);
+        timer = null;
+        isHolding = false;
+        setHoldingUI(false);
+      }
+
+      function startHold() {
+        clearHold();
+        isHolding = true;
+        setHoldingUI(true);
+        timer = window.setTimeout(() => {
+          timer = null;
+          if (!isHolding) return;
+          window.location.href = '/login';
+        }, HOLD_MS);
+      }
+
+      btn.addEventListener('pointerdown', (e) => {
+        if (e.button != null && e.button !== 0) return;
+        e.preventDefault();
+        try {
+          btn.setPointerCapture(e.pointerId);
+        } catch (_) {
+          // Ignore if not supported.
+        }
+        startHold();
+      });
+
+      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+        btn.addEventListener(ev, clearHold);
+      }
+
+      // Prevent drag / context menu from cancelling the hold.
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+      img.addEventListener('dragstart', (e) => e.preventDefault());
+
+      // Keyboard support: hold Enter/Space
+      btn.addEventListener('keydown', (e) => {
+        if (e.repeat) return;
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        startHold();
+      });
+
+      btn.addEventListener('keyup', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        clearHold();
+      });
+
+      // If the window loses focus while holding, cancel.
+      window.addEventListener('blur', clearHold);
+    })();
+  </script>
+</body>
+</html>

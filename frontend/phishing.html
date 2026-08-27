@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Phishing Scanner</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="phishing">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>Phishing Scanner</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scan Configuration</div>
+      <form id="scanForm">
+        <div class="form-group">
+          <label>Target URL</label>
+          <input type="text" id="targetUrl" placeholder="https://example.com (or example.com)" required>
+          <div class="hint" style="margin-top:6px;">Scheme is optional for testing — SecureScan will assume <span style="color:var(--text-secondary);">https://</span> when missing.</div>
+        </div>
+
+        <div class="form-group">
+          <label>Timeout (Seconds)</label>
+          <input type="text" id="timeout" value="30">
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="scanBtn">Start Scan</button>
+      </form>
+    </div>
+
+    <div class="card" id="loadingCard" style="display:none;">
+      <div class="card-title">Scanning</div>
+      <div class="scan-status-row"><span id="loadingText">Running Phishing scan…</span><span id="loadingPct">0%</span></div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div>
+    </div>
+
+    <div class="card" id="errorCard" style="display:none;">
+      <div class="card-title">Error</div>
+      <div class="result-item vuln-high">
+        <div class="result-title">Scan failed</div>
+        <div class="result-detail" id="errorMsg">—</div>
+      </div>
+    </div>
+
+    <div class="card" id="resultsCard" style="display:none;">
+      <div class="card-title">Results</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+        <button class="btn btn-primary" id="downloadBtn" type="button">Download JSON</button>
+        <button class="btn btn-secondary" id="newScanBtn" type="button">New Scan</button>
+      </div>
+      <div id="summary"></div>
+      <div class="results-section" id="vulnList"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+  const scanForm = byId('scanForm');
+
+  const loadingCard = byId('loadingCard');
+  const loadingText = byId('loadingText');
+  const loadingPct = byId('loadingPct');
+  const progressBar = byId('progressBar');
+
+  const errorCard = byId('errorCard');
+  const errorMsg = byId('errorMsg');
+
+  const resultsCard = byId('resultsCard');
+  const summary = byId('summary');
+  const vulnList = byId('vulnList');
+
+  const downloadBtn = byId('downloadBtn');
+  const newScanBtn = byId('newScanBtn');
+
+  let lastResponseEnvelope = null;
+
+   let progressTimer = null;
+   let abortController = null;
+   let currentScanId = null;
+
+  function normalizeUrlInput(input) {
+    const raw = (input || '').trim();
+    if (!raw) return '';
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return raw;
+    if (raw.startsWith('//')) return 'https:' + raw;
+    return 'https://' + raw;
+  }
+
+  function isValidHttpUrl(u) {
+    try {
+      const url = new URL(u);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch { return false; }
+  }
+
+  async function readResponseAsJsonOrText(res) {
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (ct.includes('application/json')) return { json: await res.json(), text: null };
+    return { json: null, text: await res.text() };
+  }
+
+   function showLoading(msg) {
+     loadingText.textContent = msg || 'Running Phishing scan…';
+     loadingCard.style.display = 'block';
+     let pct = 0;
+     progressBar.style.width = '0%';
+     loadingPct.textContent = '0%';
+     clearInterval(progressTimer);
+     progressTimer = setInterval(() => {
+       pct = Math.min(95, pct + Math.max(1, Math.round(Math.random() * 10)));
+       progressBar.style.width = pct + '%';
+       loadingPct.textContent = pct + '%';
+     }, 280);
+   }
+
+   function hideLoading() {
+     clearInterval(progressTimer);
+     progressTimer = null;
+     loadingCard.style.display = 'none';
+   }
+
+  function showError(msg) {
+    errorMsg.textContent = msg || 'Unknown error';
+    errorCard.style.display = 'block';
+  }
+  function hideError() { errorCard.style.display = 'none'; }
+   function hideResults() { resultsCard.style.display = 'none'; }
+   function showResults() { resultsCard.style.display = 'block'; resultsCard.scrollIntoView({behavior:'smooth',block:'start'}); }
+
+   if (downloadBtn) {
+    downloadBtn.addEventListener('click', () => {
+      if (!lastResponseEnvelope) return;
+      const dataStr = JSON.stringify(lastResponseEnvelope, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `phishing-scan-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  if (newScanBtn) {
+    newScanBtn.addEventListener('click', () => {
+      scanForm.reset();
+      hideResults();
+      hideError();
+      if (summary) clearChildren(summary);
+      if (vulnList) clearChildren(vulnList);
+      lastResponseEnvelope = null;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+
+  function sevClass(sev) {
+    const s = (sev || '').toString().toLowerCase();
+    if (s === 'critical') return 'vuln-high';
+    if (s === 'high') return 'vuln-high';
+    if (s === 'medium') return 'vuln-medium';
+    if (s === 'low') return 'vuln-low';
+    return 'vuln-medium';
+  }
+
+   scanForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+    hideResults();
+
+    const normalizedUrl = normalizeUrlInput(byId('targetUrl').value);
+    if (!isValidHttpUrl(normalizedUrl)) {
+      showError('Please enter a valid URL or hostname (e.g. https://example.com or example.com)');
+      return;
+    }
+
+    const body = {
+      url: normalizedUrl,
+      timeout: parseInt(byId('timeout').value) || 30,
+    };
+
+     showLoading('Running Phishing scan…');
+     abortController = new AbortController();
+     try {
+       const res = await fetch('/api/phishing/scan', {
+         method: 'POST',
+         headers: authHeaders(),
+         body: JSON.stringify(body),
+         signal: abortController.signal,
+       });
+
+      const parsed = await readResponseAsJsonOrText(res);
+      if (!res.ok) {
+        const msg = parsed?.json?.error
+          || (parsed?.text ? parsed.text.slice(0, 240) : null)
+          || `HTTP ${res.status}`;
+        throw new Error(`Request failed (${res.status}): ${msg}`);
+      }
+
+      const data = parsed.json;
+      if (!data || typeof data !== 'object') throw new Error('Unexpected response from server');
+       if (!data.success) throw new Error(data.error || 'Scan failed');
+
+       // Store scan_id for cancellation
+       currentScanId = data.data?.scan_id || null;
+
+      lastResponseEnvelope = data;
+
+      const result = data.data;
+      const vulns = result.vulnerabilities || [];
+      clearInterval(progressTimer);
+      progressBar.style.width = '100%';
+      loadingPct.textContent = '100%';
+
+      clearChildren(summary);
+      const level = (result && result.risk_level) ? String(result.risk_level) : (result && result.safe === false ? 'PHISHING' : 'SAFE');
+      const summaryItem = el('div', { className: `result-item ${level === 'PHISHING' ? 'vuln-high' : (level === 'SUSPICIOUS' ? 'vuln-medium' : 'vuln-safe')}` });
+      summaryItem.appendChild(el('div', { className: 'result-title', text: 'Summary' }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Target: ${result.target || '—'}` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Result: ${level}` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Phishing Score: ${result.score || 0}/100` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Feed match: ${result.feed_match ? 'Yes' : 'No'}` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Total issues: ${result.total_found != null ? result.total_found : vulns.length}` }));
+      if (result.scan_id) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Saved Scan ID: ${result.scan_id}` }));
+      }
+
+      if (result.feed_size != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Phishing feed size: ${String(result.feed_size)} URLs` }));
+      }
+      if (result.feed_last_update) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Feed last updated: ${result.feed_last_update}` }));
+      }
+
+      const ts = el('div', { className: 'result-detail', text: `Timestamp: ${result.timestamp || '—'}` });
+      ts.style.color = 'var(--text-muted)';
+      summaryItem.appendChild(ts);
+      summary.appendChild(summaryItem);
+
+      clearChildren(vulnList);
+      if (!vulns.length) {
+        const item = el('div', { className: 'result-item vuln-safe' });
+        item.appendChild(el('div', { className: 'result-title', text: 'No phishing indicators detected' }));
+        item.appendChild(el('div', { className: 'result-detail', text: 'This URL appears safe based on our checks.' }));
+        vulnList.appendChild(item);
+      } else {
+        vulns.forEach((v, i) => {
+          const item = el('div', { className: `result-item ${sevClass(v.severity)}` });
+          item.appendChild(el('div', { className: 'result-title', text: `#${i + 1} ${v.type || 'Phishing'} - ${(v.severity || 'Medium').toString()}` }));
+          if (v.evidence) {
+            item.appendChild(el('div', { className: 'result-detail', text: `Evidence: ${(v.evidence || '').toString()}` }));
+          }
+          if (v.poc) {
+            item.appendChild(el('div', { className: 'result-detail', text: `PoC: ${(v.poc || '').toString()}` }));
+          }
+          if (v.cwe) {
+            item.appendChild(el('div', { className: 'result-detail', text: `CWE: ${v.cwe}` }));
+          }
+          vulnList.appendChild(item);
+        });
+      }
+
+      showResults();
+      showToast('Phishing scan completed', 'success');
+     } catch (err) {
+       if (err.name !== 'AbortError') {
+         showError(err.message || 'Could not connect to server');
+       }
+     } finally {
+       hideLoading();
+       abortController = null;
+       currentScanId = null;
+     }
+  });
+</script>
+</body>
+</html>

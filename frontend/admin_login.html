@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Admin Login</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="admin-login">
+<div class="app-layout">
+  <main class="content" style="max-width:520px; margin:0 auto; padding-top:64px;">
+    <div class="card">
+      <div class="card-title">Admin Login</div>
+      <div class="result-item vuln-safe" style="margin-top:12px;">
+        <div class="result-title">Redirecting…</div>
+        <div class="result-detail">Admin login is now handled on the standard login page.</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/admin_common.js"></script>
+<script>
+  // Backwards compatible route for older links.
+  window.location.replace('/login');
+</script>
+</body>
+</html>

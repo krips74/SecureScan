@@ -1,0 +1,55 @@
+# Secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pkl
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Node.js (for Nodemailer helper)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs / caches
+dist/
+build/
+.cache/
+.parcel-cache/
+
+# Local DB files (if any)
+*.sqlite3
+*.db
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+backend/logs/
+
+# Generated reports/artifacts
+reports/html/
+reports/json/
+reports/pdf/
+
+# Copilot scratch logs (if present)
+copilot_terminal.log
+copilot_terminal_utf8.log

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — XSS Scanner</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="scan">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>XSS Scanner</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">XSS Scanner</div>
+      <form id="scanForm" class="form-lg">
+        <div class="form-group">
+          <label>Target URL</label>
+          <input type="url" id="targetUrl" placeholder="https://example.com/search?q=test">
+        </div>
+
+        <div class="form-group">
+          <label>Multiple URLs (Optional)</label>
+          <textarea id="targetUrls" rows="4" placeholder="https://example.com/search?q=test\nhttps://example.com/page?x=1"></textarea>
+          <div class="hint" style="margin-top:6px;">If provided, SecureScan will scan each URL (one per line) using the same options.</div>
+        </div>
+
+        <div class="form-group">
+          <label>Upload Payloads File (Optional)</label>
+          <input type="file" id="payloadsFile" accept=".txt">
+          <div id="payloadFileInfo" style="display:none;margin-top:8px;">
+            <span id="payloadFileName" style="color:var(--text-secondary);"></span>
+            <button type="button" class="btn btn-secondary" style="margin-left:10px;" id="clearPayloadBtn">Clear</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Custom Payloads (Optional)</label>
+          <textarea id="customPayloads" rows="4" placeholder="<script>alert(1)</script>\n<img src=x onerror=alert(1)>"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Scan Options</label>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:end;">
+            <div>
+              <label style="display:block;margin-bottom:6px;">Timeout (seconds)</label>
+              <input type="number" id="reqTimeout" min="1" max="60" value="10">
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;">Max duration (seconds)</label>
+              <input type="number" id="maxDuration" min="3" max="120" value="25">
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:6px;">Max payloads</label>
+              <input type="number" id="maxPayloads" min="1" max="200" value="25">
+            </div>
+          </div>
+          <div style="margin-top:10px;">
+            <label style="display:flex;gap:10px;align-items:center;cursor:pointer;user-select:none;">
+              <input type="checkbox" id="stopOnFirst" checked>
+              <span>Stop on first finding per parameter (recommended)</span>
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="scanBtn">Start Scan</button>
+      </form>
+    </div>
+
+    <div class="card" id="loadingCard" style="display:none;">
+      <div class="card-title">Scanning</div>
+      <div class="scan-status-row"><span id="loadingText">Running XSS scan…</span><span id="loadingPct">0%</span></div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div>
+    </div>
+
+    <div class="card" id="errorCard" style="display:none;">
+      <div class="card-title">Error</div>
+      <div class="result-item vuln-high">
+        <div class="result-title">Scan failed</div>
+        <div class="result-detail" id="errorMsg">—</div>
+      </div>
+    </div>
+
+    <div class="card" id="resultsCard" style="display:none;">
+      <div class="card-title">Results</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+        <button class="btn btn-primary" id="downloadBtn" type="button">Download JSON</button>
+        <button class="btn btn-secondary" id="newScanBtn" type="button">New Scan</button>
+      </div>
+      <div id="resultsSummary"></div>
+      <div class="results-section" id="vulnerabilitiesList"></div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+
+  const scanForm = byId('scanForm');
+  const payloadFileInput = byId('payloadsFile');
+  const payloadFileInfo = byId('payloadFileInfo');
+  const payloadFileName = byId('payloadFileName');
+  const clearPayloadBtn = byId('clearPayloadBtn');
+
+  const loadingCard = byId('loadingCard');
+  const loadingText = byId('loadingText');
+  const loadingPct = byId('loadingPct');
+  const progressBar = byId('progressBar');
+
+  const errorCard = byId('errorCard');
+  const errorMsg = byId('errorMsg');
+
+  const resultsCard = byId('resultsCard');
+  const resultsSummary = byId('resultsSummary');
+  const vulnerabilitiesList = byId('vulnerabilitiesList');
+
+   let lastResult = null;
+   let progressTimer = null;
+   let abortController = null;
+   let currentScanId = null;
+
+  function isValidUrl(u) {
+    try {
+      const url = new URL(u);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch { return false; }
+  }
+
+   function showLoading(msg) {
+     loadingText.textContent = msg || 'Running XSS scan…';
+     loadingCard.style.display = 'block';
+     let pct = 0;
+     progressBar.style.width = '0%';
+     loadingPct.textContent = '0%';
+     clearInterval(progressTimer);
+     progressTimer = setInterval(() => {
+       pct = Math.min(95, pct + Math.max(1, Math.round(Math.random() * 8)));
+       progressBar.style.width = pct + '%';
+       loadingPct.textContent = pct + '%';
+     }, 300);
+   }
+
+   function hideLoading() {
+     clearInterval(progressTimer);
+     progressTimer = null;
+     loadingCard.style.display = 'none';
+     progressBar.style.width = '0%';
+     loadingPct.textContent = '0%';
+   }
+
+  function showError(msg) {
+    errorMsg.textContent = msg || 'Unknown error';
+    errorCard.style.display = 'block';
+  }
+
+  function hideError() {
+    errorCard.style.display = 'none';
+  }
+
+  function showResults() {
+    resultsCard.style.display = 'block';
+    resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+   function hideResults() {
+     resultsCard.style.display = 'none';
+   }
+
+   function severityClass(sev) {
+    const s = (sev || '').toString().toLowerCase();
+    if (s === 'critical' || s === 'high') return 'vuln-high';
+    if (s === 'medium') return 'vuln-medium';
+    if (s === 'low') return 'vuln-low';
+    return 'vuln-medium';
+  }
+
+  function techniqueLabel(scanType) {
+    const s = (scanType || '').toString().toLowerCase();
+    if (s === 'dom') return 'DOM-based XSS';
+    if (s === 'stored') return 'Stored XSS (heuristic)';
+    if (s === 'reflected_raw' || s === 'reflected') return 'Reflected XSS';
+    return scanType ? scanType.toString() : '—';
+  }
+
+  payloadFileInput.addEventListener('change', async () => {
+    const file = payloadFileInput.files[0];
+    if (!file) {
+      payloadFileInfo.style.display = 'none';
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith('.txt')) {
+      showToast('Only .txt files are allowed', 'error');
+      payloadFileInput.value = '';
+      payloadFileInfo.style.display = 'none';
+      return;
+    }
+    payloadFileName.textContent = file.name;
+    payloadFileInfo.style.display = 'block';
+    byId('customPayloads').value = '';
+  });
+
+  clearPayloadBtn.addEventListener('click', () => {
+    payloadFileInput.value = '';
+    payloadFileInfo.style.display = 'none';
+  });
+
+  byId('downloadBtn').addEventListener('click', () => {
+    if (!lastResult) return;
+    const dataStr = JSON.stringify(lastResult, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `xss-scan-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+   byId('newScanBtn').addEventListener('click', () => {
+     scanForm.reset();
+     payloadFileInfo.style.display = 'none';
+     hideResults();
+     hideError();
+     lastResult = null;
+     window.scrollTo({ top: 0, behavior: 'smooth' });
+   });
+
+   scanForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+    hideResults();
+
+    const targetUrl = byId('targetUrl').value.trim();
+    const multiText = (byId('targetUrls').value || '').trim();
+    const urls = multiText
+      ? multiText.split('\n').map(x => x.trim()).filter(Boolean)
+      : (targetUrl ? [targetUrl] : []);
+
+    if (!urls.length) {
+      showError('Please enter a Target URL or provide Multiple URLs.');
+      return;
+    }
+    for (const u of urls) {
+      if (!isValidUrl(u)) {
+        showError('One or more URLs are invalid. All URLs must start with http:// or https://');
+        return;
+      }
+    }
+
+    let customPayloads = [];
+    const file = payloadFileInput.files[0];
+    if (file) {
+      const text = await file.text();
+      customPayloads = text.split('\n').map(x => x.trim()).filter(Boolean);
+    } else {
+      const text = (byId('customPayloads').value || '').trim();
+      if (text) customPayloads = text.split('\n').map(x => x.trim()).filter(Boolean);
+    }
+
+     showLoading(urls.length > 1 ? `Running XSS batch scan (${urls.length} URLs)…` : 'Running XSS scan…');
+     abortController = new AbortController();
+    try {
+      const body = urls.length > 1 ? { urls } : { url: urls[0] };
+      if (customPayloads.length) body.custom_payloads = customPayloads;
+
+      const timeout = parseInt(byId('reqTimeout').value, 10);
+      const maxDuration = parseInt(byId('maxDuration').value, 10);
+      const maxPayloads = parseInt(byId('maxPayloads').value, 10);
+      const stopOnFirst = !!byId('stopOnFirst').checked;
+
+      if (!Number.isNaN(timeout)) body.timeout = timeout;
+      if (!Number.isNaN(maxDuration)) body.max_duration = maxDuration;
+      if (!Number.isNaN(maxPayloads)) body.max_payloads = maxPayloads;
+      body.stop_on_first = stopOnFirst;
+      // Auto-enabled: no checklist.
+      body.include_dom = true;
+      body.include_stored = true;
+
+      const endpoint = urls.length > 1 ? '/api/xss/scan/batch' : '/api/xss/scan';
+       const res = await fetch(endpoint, {
+         method: 'POST',
+         headers: authHeaders(),
+         body: JSON.stringify(body),
+         signal: abortController.signal,
+       });
+       const data = await res.json();
+       if (data.data && data.data.scan_id) {
+         currentScanId = data.data.scan_id;
+       } else {
+         currentScanId = null;
+       }
+      if (!data.success) throw new Error(data.error || 'Scan failed');
+
+      lastResult = data.data;
+      clearInterval(progressTimer);
+      progressBar.style.width = '100%';
+      loadingPct.textContent = '100%';
+
+      const isBatch = Array.isArray(lastResult.scans);
+      const total = isBatch ? (lastResult.total_vulnerabilities || 0) : (lastResult.total_found || 0);
+      clearChildren(resultsSummary);
+      const summaryItem = el('div', { className: `result-item ${total > 0 ? 'vuln-high' : 'vuln-safe'}` });
+      summaryItem.appendChild(el('div', { className: 'result-title', text: 'Summary' }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: isBatch ? `URLs scanned: ${lastResult.total_scanned || 0}` : `Target: ${lastResult.target || '—'}` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: isBatch ? `Total vulnerabilities: ${total}` : `Total vulnerabilities: ${total}` }));
+
+      if (isBatch) {
+        if (lastResult.success_rate != null && lastResult.success_rate !== '') {
+          summaryItem.appendChild(el('div', { className: 'result-detail', text: `Success rate: ${Number(lastResult.success_rate).toFixed(1)}%` }));
+        }
+      } else {
+        const vulns = Array.isArray(lastResult.vulnerabilities) ? lastResult.vulnerabilities : [];
+        const byTechnique = { reflected: 0, dom: 0, stored: 0, other: 0 };
+        for (const v of vulns) {
+          const st = (v && v.scan_type ? String(v.scan_type) : '').toLowerCase();
+          if (st === 'dom') byTechnique.dom += 1;
+          else if (st === 'stored') byTechnique.stored += 1;
+          else if (st === 'reflected_raw' || st === 'reflected') byTechnique.reflected += 1;
+          else byTechnique.other += 1;
+        }
+        summaryItem.appendChild(el('div', {
+          className: 'result-detail',
+          text: `Detected techniques: Reflected ${byTechnique.reflected}, DOM ${byTechnique.dom}, Stored ${byTechnique.stored}${byTechnique.other ? `, Other ${byTechnique.other}` : ''}`
+        }));
+      }
+
+      if (typeof lastResult.truncated === 'boolean') {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Time budget: ${lastResult.truncated ? 'Reached (partial results)' : 'Completed'}` }));
+      }
+      if (lastResult.duration_seconds != null && lastResult.duration_seconds !== '') {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Duration: ${lastResult.duration_seconds}s` }));
+      }
+      if (lastResult.payloads_tested != null && lastResult.payloads_tested !== '') {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Payloads tested: ${lastResult.payloads_tested}` }));
+      }
+      if (lastResult.params_tested_count != null && lastResult.params_tested_count !== '') {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Parameters tested: ${lastResult.params_tested_count}` }));
+      }
+      if (lastResult.payload_attempts != null && lastResult.payload_attempts !== '') {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Payload attempts: ${lastResult.payload_attempts}` }));
+      }
+      if (lastResult.requests_made != null && lastResult.requests_made !== '') {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `HTTP requests made: ${lastResult.requests_made}` }));
+      }
+      if (!isBatch && Array.isArray(lastResult.notes) && lastResult.notes.length) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Notes: ${lastResult.notes.join(' | ')}` }));
+      }
+      const ts = el('div', { className: 'result-detail', text: `Timestamp: ${lastResult.timestamp || '—'}` });
+      ts.style.color = 'var(--text-muted)';
+      summaryItem.appendChild(ts);
+      resultsSummary.appendChild(summaryItem);
+
+      clearChildren(vulnerabilitiesList);
+      if (isBatch) {
+        const scans = Array.isArray(lastResult.scans) ? lastResult.scans : [];
+        if (!scans.length) {
+          const item = el('div', { className: 'result-item vuln-safe' });
+          item.appendChild(el('div', { className: 'result-title', text: 'No results' }));
+          item.appendChild(el('div', { className: 'result-detail', text: 'No scan entries returned.' }));
+          vulnerabilitiesList.appendChild(item);
+        } else {
+          scans.forEach((s, idx) => {
+            const ok = !!s.success;
+            const found = ok ? (s.total_found || 0) : 0;
+
+            const item = el('div', { className: `result-item ${ok ? (found > 0 ? 'vuln-high' : 'vuln-safe') : 'vuln-medium'}` });
+            item.appendChild(el('div', { className: 'result-title', text: `#${idx + 1} ${s.target || '—'}` }));
+            if (!ok) {
+              item.appendChild(el('div', { className: 'result-detail', text: `Error: ${s.error || 'Scan failed'}` }));
+              vulnerabilitiesList.appendChild(item);
+              return;
+            }
+
+            const svulns = Array.isArray(s.vulnerabilities) ? s.vulnerabilities : [];
+            const byTechnique = { reflected: 0, dom: 0, stored: 0, other: 0 };
+            for (const v of svulns) {
+              const st = (v && v.scan_type ? String(v.scan_type) : '').toLowerCase();
+              if (st === 'dom') byTechnique.dom += 1;
+              else if (st === 'stored') byTechnique.stored += 1;
+              else if (st === 'reflected_raw' || st === 'reflected') byTechnique.reflected += 1;
+              else byTechnique.other += 1;
+            }
+
+            item.appendChild(el('div', { className: 'result-detail', text: `Total vulnerabilities: ${found}` }));
+            item.appendChild(el('div', { className: 'result-detail', text: `Techniques: Reflected ${byTechnique.reflected}, DOM ${byTechnique.dom}, Stored ${byTechnique.stored}${byTechnique.other ? `, Other ${byTechnique.other}` : ''}` }));
+            if (Array.isArray(s.notes) && s.notes.length) {
+              item.appendChild(el('div', { className: 'result-detail', text: `Notes: ${s.notes.join(' | ')}` }));
+            }
+
+            vulnerabilitiesList.appendChild(item);
+          });
+        }
+      } else {
+        const vulns = Array.isArray(lastResult.vulnerabilities) ? lastResult.vulnerabilities : [];
+        if (!vulns.length) {
+          const item = el('div', { className: 'result-item vuln-safe' });
+          item.appendChild(el('div', { className: 'result-title', text: 'No XSS detected' }));
+          item.appendChild(el('div', { className: 'result-detail', text: 'No vulnerabilities found for this target.' }));
+          vulnerabilitiesList.appendChild(item);
+        } else {
+          vulns.forEach((v, i) => {
+            const item = el('div', { className: `result-item ${severityClass(v.severity)}` });
+            item.appendChild(el('div', { className: 'result-title', text: `#${i + 1} ${v.type || 'XSS'} - ${(v.severity || 'Medium').toString()}` }));
+
+            if (v.scan_type) {
+              item.appendChild(el('div', { className: 'result-detail', text: `Technique: ${techniqueLabel(v.scan_type)}` }));
+            }
+            item.appendChild(el('div', { className: 'result-detail', text: `Parameter: ${(v.parameter || '—').toString()}` }));
+            item.appendChild(el('div', { className: 'result-detail', text: `Payload: ${(v.payload || '—').toString()}` }));
+            if (v.evidence) {
+              item.appendChild(el('div', { className: 'result-detail', text: `Evidence: ${(v.evidence || '').toString()}` }));
+            }
+            if (v.poc) {
+              item.appendChild(el('div', { className: 'result-detail', text: `PoC: ${(v.poc || '').toString()}` }));
+            }
+            if (v.verification_url) {
+              item.appendChild(el('div', { className: 'result-detail', text: `Verification: ${(v.verification_url || '').toString()}` }));
+            }
+            vulnerabilitiesList.appendChild(item);
+          });
+        }
+      }
+
+      showResults();
+      showToast(isBatch ? 'XSS batch scan completed' : 'XSS scan completed', 'success');
+     } catch (err) {
+       if (err.name === 'AbortError') {
+         // Scan was cancelled by user; ignore error UI
+         console.log('Scan aborted');
+       } else {
+         showError(err.message || 'Could not connect to server');
+       }
+     } finally {
+       hideLoading();
+       abortController = null;
+       currentScanId = null;
+     }
+  });
+</script>
+</body>
+</html>

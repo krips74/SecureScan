@@ -1,0 +1,14 @@
+https://fr.lightspeedhq.com/wp-json/wp/v2/pages/59608
+
+
+https://pentest-ground.com:4280/vulnerabilities/xss_r/?name=hey#
+
+https://pentest-ground.com:4280/vulnerabilities/xss_d/?default=English
+
+https://pentest-ground.com:4280/vulnerabilities/sqli/?id=admin&Submit=Submit#
+
+https://pentest-ground.com:4280/vulnerabilities/sqli_blind/
+
+https://facboook.com
+
+https://nweb42.com/goto/?url=https://prime.edu.np

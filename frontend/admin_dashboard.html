@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Admin Dashboard</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="stylesheet" href="assets/css/admin.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="admin-dashboard">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="admin-topbar">
+      <div>
+        <div class="admin-title">Security Control Center</div>
+        <div class="admin-subtitle">System-wide visibility • monitoring only</div>
+      </div>
+      <div class="admin-subtitle" id="lastRefresh">Last refresh: —</div>
+    </div>
+
+    <div class="admin-kpi-grid">
+      <div class="admin-kpi">
+        <div class="kpi-label">Total users</div>
+        <div class="kpi-value" id="statTotalUsers">—</div>
+        <div class="kpi-hint">All accounts in system</div>
+      </div>
+      <div class="admin-kpi">
+        <div class="kpi-label">Total scans</div>
+        <div class="kpi-value" id="statTotalScans">—</div>
+        <div class="kpi-hint">All users combined</div>
+      </div>
+      <div class="admin-kpi">
+        <div class="kpi-label">Total vulnerabilities</div>
+        <div class="kpi-value" id="statTotalVulns">—</div>
+        <div class="kpi-hint">Normalized findings</div>
+      </div>
+      <div class="admin-kpi">
+        <div class="kpi-label">System scan activity</div>
+        <div class="kpi-value" id="statDaily">—</div>
+        <div class="kpi-hint">Last 14 days</div>
+      </div>
+    </div>
+
+    <div class="admin-grid-2">
+      <div class="admin-panel">
+        <div class="admin-panel-title">
+          <span>System-wide scan activity chart</span>
+        </div>
+        <div class="admin-panel-body" style="height:260px;">
+          <canvas id="chartDaily" style="width:100%; height:100%;"></canvas>
+        </div>
+      </div>
+
+      <div class="admin-panel admin-right-pane">
+        <div class="admin-panel-title">
+          <span>Real-time activity feed (all users)</span>
+          <span class="badge badge-muted" id="feedCount">0</span>
+        </div>
+        <div class="admin-panel-body">
+          <div id="activityFeed" class="admin-feed">
+            <div class="admin-feed-item">
+              <div class="line1"><span class="who">Waiting</span><span class="meta">—</span></div>
+              <div class="line2">No activity yet.</div>
+            </div>
+          </div>
+          <div id="dashError" style="display:none; margin-top:12px;"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/admin_common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+
+  function setText(id, v) {
+    const el = byId(id);
+    if (el) el.textContent = (v == null ? '—' : String(v));
+  }
+
+  function statusBadge(status) {
+    const s = (status || '').toString().toLowerCase();
+    const map = {
+      completed: 'success',
+      failed: 'danger',
+      running: 'warning'
+    };
+    const variant = map[s] || 'muted';
+    const span = el('span', { className: `badge badge-${variant}`, text: (status || '—').toString().toUpperCase() });
+    return span;
+  }
+
+  function showDashError(msg) {
+    const wrap = byId('dashError');
+    wrap.style.display = 'block';
+    const item = el('div', { className: 'result-item vuln-high' });
+    item.appendChild(el('div', { className: 'result-title', text: 'Dashboard failed to load' }));
+    item.appendChild(el('div', { className: 'result-detail', text: msg || 'Unknown error' }));
+    wrap.replaceChildren(item);
+  }
+
+  function formatWhen(ts) {
+    if (!ts) return '—';
+    try {
+      return new Date(ts).toLocaleString();
+    } catch (e) {
+      return String(ts);
+    }
+  }
+
+  function renderFeed(rows) {
+    const feed = byId('activityFeed');
+    const list = Array.isArray(rows) ? rows : [];
+    byId('feedCount').textContent = String(list.length);
+
+    if (!list.length) {
+      feed.replaceChildren(
+        el('div', { className: 'admin-feed-item' })
+      );
+      return;
+    }
+
+    clearChildren(feed);
+    for (const r of list.slice(0, 20)) {
+      const item = el('div', { className: 'admin-feed-item' });
+
+      const line1 = el('div', { className: 'line1' });
+      line1.appendChild(el('span', { className: 'who', text: (r.username || 'User') }));
+      line1.appendChild(el('span', { className: 'meta', text: `${(r.status || '—').toString().toUpperCase()} • #${r.scan_id || '—'}` }));
+
+      const line2 = el('div', { className: 'line2', text: `${r.scan_type || '—'} → ${r.target_url || '—'}` });
+      const line3 = el('div', { className: 'line2', text: `Started: ${formatWhen(r.timestamp)}` });
+
+      item.appendChild(line1);
+      item.appendChild(line2);
+      item.appendChild(line3);
+      feed.appendChild(item);
+    }
+  }
+
+  async function loadDashboard() {
+    const res = await adminFetch('/api/admin/dashboard', { method: 'GET' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) {
+      throw new Error((data && data.error) ? data.error : 'Request failed');
+    }
+
+    const stats = data.stats || {};
+    setText('statTotalUsers', stats.total_users);
+    setText('statTotalScans', stats.total_scans);
+    setText('statTotalVulns', stats.total_vulnerabilities);
+
+    const charts = data.charts || {};
+    const daily = Array.isArray(charts.daily_scans) ? charts.daily_scans : [];
+    drawLineChart(byId('chartDaily'), daily);
+
+    const dailyTotal = daily.reduce((acc, p) => acc + Number(p.count || 0), 0);
+    setText('statDaily', dailyTotal);
+
+    const rows = Array.isArray(data.recent_activity) ? data.recent_activity : [];
+    renderFeed(rows);
+
+    const lr = byId('lastRefresh');
+    if (lr) lr.textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
+  }
+
+  (async function init() {
+    try {
+      await loadDashboard();
+    } catch (e) {
+      showDashError(e && e.message ? e.message : 'Could not connect to server');
+    }
+
+    // lightweight "real-time" refresh
+    setInterval(() => {
+      loadDashboard().catch(() => {});
+    }, 15000);
+
+    window.addEventListener('resize', () => {
+      loadDashboard().catch(() => {});
+    });
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Dashboard</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="index">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>Security Dashboard</h1>
+      <div class="subtitle">Monitor your web application security status</div>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="stat-grid" id="statGrid">
+      <div class="stat-card accent">
+        <div class="stat-card-header">
+          <div class="stat-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg></div>
+        </div>
+        <div class="stat-label">Total Scans Run</div>
+        <div class="stat-value" id="statScans">—</div>
+        <div class="stat-trend positive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg> Last 30 days</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-card-header">
+          <div class="stat-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9a2 2 0 100 4 2 2 0 000-4zm0 8v-2m0-4h.01M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z"/></svg></div>
+        </div>
+        <div class="stat-label">Vulnerabilities Detected</div>
+        <div class="stat-value" id="statVulns">—</div>
+        <div class="stat-trend negative"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-3.19L12.83 7.5a2 2 0 00-3.47-1.64L5.07 19z"/></svg> Cumulative count</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="stat-card-header">
+          <div class="stat-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg></div>
+        </div>
+        <div class="stat-label">High Risk Findings</div>
+        <div class="stat-value" id="statHighRisk">—</div>
+        <div class="stat-trend"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> CRIT & HIGH severity</div>
+      </div>
+      <div class="stat-card success">
+        <div class="stat-card-header">
+          <div class="stat-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div>
+        </div>
+        <div class="stat-label">Weekly Scan Activity</div>
+        <div class="stat-value" id="statWeek">—</div>
+        <div class="stat-trend positive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg> Last 7 days</div>
+      </div>
+    </div>
+
+    <!-- Tool Grid -->
+    <div class="card tool-card-main">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+        Available Security Tools
+      </div>
+      <div class="tool-grid">
+        <div class="tool-tile" data-kind="xss" onclick="go('/scan')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){go('/scan');}">
+          <div class="tool-tile-header">
+            <div class="tool-tile-left">
+              <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="xss" aria-hidden="true"></span></div>
+              <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">XSS Scanner</h3></div>
+            </div>
+          </div>
+          <div class="tool-footer"><span>Reflected · Stored · DOM</span><span class="tool-action">Open →</span></div>
+        </div>
+
+        <div class="tool-tile" data-kind="sqli" onclick="go('/sql_injection')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){go('/sql_injection');}">
+          <div class="tool-tile-header">
+            <div class="tool-tile-left">
+              <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="sqli" aria-hidden="true"></span></div>
+              <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">SQL Injection</h3></div>
+            </div>
+          </div>
+          <div class="tool-footer"><span>Database exposure</span><span class="tool-action">Open →</span></div>
+        </div>
+
+        <div class="tool-tile" data-kind="redirect" onclick="go('/open_redirect')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){go('/open_redirect');}">
+          <div class="tool-tile-header">
+            <div class="tool-tile-left">
+              <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="redirect" aria-hidden="true"></span></div>
+              <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">Open Redirect</h3></div>
+            </div>
+          </div>
+          <div class="tool-footer"><span>URL routing</span><span class="tool-action">Open →</span></div>
+        </div>
+
+        <div class="tool-tile" data-kind="cors" onclick="go('/cors_scan')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){go('/cors_scan');}">
+          <div class="tool-tile-header">
+            <div class="tool-tile-left">
+              <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="cors" aria-hidden="true"></span></div>
+              <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">CORS Tester</h3></div>
+            </div>
+          </div>
+          <div class="tool-footer"><span>CORS policy</span><span class="tool-action">Open →</span></div>
+        </div>
+
+        <div class="tool-tile" data-kind="headers" onclick="go('/header_scan')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){go('/header_scan');}">
+          <div class="tool-tile-header">
+            <div class="tool-tile-left">
+              <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="headers" aria-hidden="true"></span></div>
+              <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">Header Analysis</h3></div>
+            </div>
+          </div>
+          <div class="tool-footer"><span>Configuration posture</span><span class="tool-action">Open →</span></div>
+        </div>
+
+        <div class="tool-tile" data-kind="phishing" onclick="go('/phishing')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){go('/phishing');}">
+          <div class="tool-tile-header">
+            <div class="tool-tile-left">
+              <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="phishing" aria-hidden="true"></span></div>
+              <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">Phishing Scanner</h3></div>
+            </div>
+          </div>
+          <div class="tool-footer"><span>URL verification</span><span class="tool-action">Open →</span></div>
+        </div>
+
+        <div class="tool-tile" data-kind="advanced" onclick="go('/advanced_scan')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){go('/advanced_scan');}">
+          <div class="tool-tile-header">
+            <div class="tool-tile-left">
+              <div class="tool-glass-orb"><span class="tool-tile-icon" data-kind="advanced" aria-hidden="true"></span></div>
+              <div><div class="tool-kicker">SCAN</div><h3 class="tool-title">Advanced Scan</h3></div>
+            </div>
+          </div>
+          <div class="tool-footer"><span>Unified workflow</span><span class="tool-action">Open →</span></div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Recent Scans Table -->
+    <div class="card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+        Recent Scan History
+      </div>
+      <div id="recentScans">
+        <div class="empty-state"><p>No scans yet. Start by opening a tool above.</p></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const welcomeEl = document.getElementById('welcomeUser');
+  if (welcomeEl) welcomeEl.textContent = getUsername();
+
+  // Add icons to dashboard tool tiles using the existing SVG icon set.
+  (function initToolTileIcons() {
+    try {
+      const slots = document.querySelectorAll('.tool-tile-icon[data-kind]');
+      for (const slot of slots) {
+        const kind = slot.getAttribute('data-kind') || 'dashboard';
+        if (typeof iconSvg === 'function') slot.appendChild(iconSvg(kind));
+      }
+    } catch (e) {}
+  })();
+
+  async function loadStats() {
+    try {
+      const res = await fetch('/api/scans/stats', { headers: authHeaders() });
+      const data = await res.json();
+      if (data.success) {
+        document.getElementById('statScans').textContent    = data.total_scans;
+        document.getElementById('statVulns').textContent    = data.total_vulnerabilities;
+        document.getElementById('statHighRisk').textContent = data.high_risk_scans;
+        document.getElementById('statWeek').textContent     = data.scans_this_week;
+      }
+    } catch(e) {}
+  }
+
+  async function loadRecent() {
+    try {
+      const res = await fetch('/api/scans/history', { headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success || !Array.isArray(data.scans) || !data.scans.length) return;
+
+      const wrap = document.getElementById('recentScans');
+      clearChildren(wrap);
+
+      const table = el('table', { className: 'data-table' });
+      const thead = el('thead');
+      const headRow = el('tr');
+      for (const h of ['Target URL', 'Scan Types', 'Severity', 'Vulns', 'Date']) {
+        headRow.appendChild(el('th', { text: h }));
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = el('tbody');
+      const scans = (data.scans || []).slice(0, 10);
+      for (const s of scans) {
+        const tr = el('tr');
+
+        const tdUrl = el('td', { className: 'url-cell', text: s.target_url || '—' });
+        tr.appendChild(tdUrl);
+
+        let typesText = '—';
+        try {
+          if (s.scan_types) {
+            const parsed = typeof s.scan_types === 'string' ? JSON.parse(s.scan_types) : s.scan_types;
+            if (Array.isArray(parsed)) typesText = parsed.join(', ');
+          }
+        } catch (e) {
+          typesText = '—';
+        }
+        tr.appendChild(el('td', { text: typesText }));
+
+        const tdSev = el('td');
+        tdSev.appendChild(severityBadgeEl(s.severity));
+        tr.appendChild(tdSev);
+
+        const tdV = el('td');
+        tdV.appendChild(badgeEl(String(s.total_vulns ?? 0), (s.total_vulns || 0) > 0 ? 'danger' : 'success'));
+        tr.appendChild(tdV);
+
+        const tdDate = el('td');
+        tdDate.style.color = 'var(--text-secondary)';
+        tdDate.style.fontSize = '12px';
+        tdDate.textContent = formatDate(s.started_at);
+        tr.appendChild(tdDate);
+
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+    } catch(e) {}
+  }
+
+
+  function go(page) { window.location.href = page; }
+
+  loadStats();
+  loadRecent();
+
+  // Ensure stats refresh when returning via browser back/forward cache.
+  window.addEventListener('pageshow', () => {
+    loadStats();
+    loadRecent();
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Open Redirect</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="open_redirect">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>Open Redirect</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scan Configuration</div>
+      <form id="scanForm">
+        <div class="form-group">
+          <label>Target URL</label>
+          <input type="url" id="targetUrl" placeholder="https://example.com/login?next=/" required>
+        </div>
+
+        <div class="form-group">
+          <label>Parameters (Optional)</label>
+          <input type="text" id="parameters" placeholder="next,redirect,url">
+        </div>
+
+        <button class="btn btn-primary" id="scanBtn" type="submit">Start Scan</button>
+      </form>
+    </div>
+
+    <div class="card" id="errorCard" style="display:none;">
+      <div class="card-title">Error</div>
+      <div class="result-item vuln-high">
+        <div class="result-title">Scan failed</div>
+        <div class="result-detail" id="errorMsg">—</div>
+      </div>
+    </div>
+
+    <div class="card" id="resultsCard" style="display:none;">
+      <div class="card-title">Results</div>
+      <div id="summary"></div>
+      <div class="results-section" id="vulnList"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const scanForm = $('scanForm');
+  const scanBtn = $('scanBtn');
+  const errorCard = $('errorCard');
+  const errorMsg = $('errorMsg');
+   const resultsCard = $('resultsCard');
+   const summary = $('summary');
+   const vulnList = $('vulnList');
+
+   let abortController = null;
+   let currentScanId = null;
+
+   function setLoading(isLoading) {
+     if (!scanBtn) return;
+     scanBtn.disabled = !!isLoading;
+     scanBtn.classList.toggle('loading', !!isLoading);
+     scanBtn.textContent = isLoading ? 'Scanning…' : 'Start Scan';
+   }
+
+  function isValidUrl(u) {
+    try {
+      const url = new URL(u);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch { return false; }
+  }
+
+  function sevClass(sev) {
+    const s = (sev || '').toString().toLowerCase();
+    if (s === 'critical' || s === 'high') return 'vuln-high';
+    if (s === 'medium') return 'vuln-medium';
+    if (s === 'low') return 'vuln-low';
+    return 'vuln-medium';
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg || 'Unknown error';
+    errorCard.style.display = 'block';
+  }
+  function hideError() { errorCard.style.display = 'none'; }
+
+  scanForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+    setLoading(true);
+    resultsCard.style.display = 'block';
+
+    clearChildren(summary);
+    clearChildren(vulnList);
+    const loadingItem = el('div', { className: 'result-item vuln-medium' });
+    loadingItem.appendChild(el('div', { className: 'result-title', text: 'Scanning…' }));
+    loadingItem.appendChild(el('div', { className: 'result-detail', text: 'Please wait while we test redirect parameters.' }));
+    summary.appendChild(loadingItem);
+
+    const url = $('targetUrl').value.trim();
+    if (!isValidUrl(url)) {
+      showError('Please enter a valid URL starting with http:// or https://');
+      resultsCard.style.display = 'none';
+      setLoading(false);
+      return;
+    }
+
+    const paramsText = ($('parameters').value || '').trim();
+    const parameters = paramsText ? paramsText.split(',').map(x => x.trim()).filter(Boolean) : undefined;
+
+    try {
+      const body = { url };
+      if (parameters && parameters.length) body.parameters = parameters;
+
+      const res = await fetch('/api/open-redirect/scan', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Scan failed');
+
+      const result = data.data;
+      const vulns = result.vulnerabilities || [];
+
+      clearChildren(summary);
+      const summaryItem = el('div', { className: `result-item ${vulns.length ? 'vuln-high' : 'vuln-safe'}` });
+      summaryItem.appendChild(el('div', { className: 'result-title', text: 'Summary' }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Target: ${result.target || '—'}` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Total findings: ${vulns.length}` }));
+      if (result.scan_id) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Saved Scan ID: ${result.scan_id}` }));
+      }
+      summary.appendChild(summaryItem);
+
+      clearChildren(vulnList);
+      if (!vulns.length) {
+        const item = el('div', { className: 'result-item vuln-safe' });
+        item.appendChild(el('div', { className: 'result-title', text: 'No open redirects detected' }));
+        item.appendChild(el('div', { className: 'result-detail', text: 'No redirect vulnerabilities found for this target.' }));
+        vulnList.appendChild(item);
+      } else {
+        vulns.forEach((v, i) => {
+          const item = el('div', { className: `result-item ${sevClass(v.severity)}` });
+          item.appendChild(el('div', { className: 'result-title', text: `#${i + 1} ${v.type || 'Open Redirect'} - ${(v.severity || 'Medium').toString()}` }));
+          item.appendChild(el('div', { className: 'result-detail', text: `Parameter: ${(v.parameter || '—').toString()}` }));
+          item.appendChild(el('div', { className: 'result-detail', text: `Payload: ${(v.payload || '—').toString()}` }));
+          if (v.evidence) {
+            item.appendChild(el('div', { className: 'result-detail', text: `Evidence: ${(v.evidence || '').toString()}` }));
+          }
+          vulnList.appendChild(item);
+        });
+      }
+
+      resultsCard.style.display = 'block';
+      resultsCard.scrollIntoView({behavior:'smooth',block:'start'});
+      showToast('Open redirect scan completed', 'success');
+    } catch (err) {
+      showError(err.message || 'Could not connect to server');
+      resultsCard.style.display = 'none';
+    } finally {
+      setLoading(false);
+    }
+  });
+</script>
+</body>
+</html>

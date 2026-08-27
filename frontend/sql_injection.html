@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — SQL Injection</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="sql_injection">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>SQL Injection</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scan Configuration</div>
+      <form id="scanForm">
+        <div class="form-group">
+          <label>Target URL</label>
+          <input type="url" id="targetUrl" placeholder="https://example.com/product?id=1" required>
+        </div>
+
+        <div class="form-group">
+          <label>Safe Mode</label>
+          <select id="safeMode">
+            <option value="true" selected>ON (recommended)</option>
+            <option value="false">OFF</option>
+          </select>
+        </div>
+
+        <div class="input-row">
+          <div class="form-group" style="flex:1;">
+            <label>HTTP Method</label>
+            <select id="httpMethod">
+              <option value="GET" selected>GET</option>
+              <option value="POST">POST</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Timeout (Seconds)</label>
+            <input type="text" id="timeout" value="10">
+          </div>
+        </div>
+
+        <div class="form-group" id="bodyTemplateGroup" style="display:none;">
+          <label>POST Body Template</label>
+          <textarea id="bodyTemplate" rows="3" placeholder='{"username":"{{INJECT}}","password":"test"}'></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Custom Payloads (Optional)</label>
+          <textarea id="customSqlPayloads" rows="4" placeholder="' OR '1'='1\n1 AND SLEEP(5)--"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Scan Options</label>
+          <div style="margin-top:10px;">
+            <label style="display:flex;gap:10px;align-items:center;cursor:pointer;user-select:none;">
+              <input type="checkbox" id="stopOnFirst">
+              <span>Stop on first finding per parameter (recommended)</span>
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="scanBtn">Start Scan</button>
+      </form>
+    </div>
+
+    <div class="card" id="loadingCard" style="display:none;">
+      <div class="card-title">Scanning</div>
+      <div class="scan-status-row"><span id="loadingText">Running SQLi scan…</span><span id="loadingPct">0%</span></div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div>
+    </div>
+
+    <div class="card" id="errorCard" style="display:none;">
+      <div class="card-title">Error</div>
+      <div class="result-item vuln-high">
+        <div class="result-title">Scan failed</div>
+        <div class="result-detail" id="errorMsg">—</div>
+      </div>
+    </div>
+
+    <div class="card" id="resultsCard" style="display:none;">
+      <div class="card-title">Results</div>
+      <div id="summary"></div>
+      <div class="results-section" id="vulnList"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+  const scanForm = byId('scanForm');
+  const methodSelect = byId('httpMethod');
+  const bodyGroup = byId('bodyTemplateGroup');
+
+  const loadingCard = byId('loadingCard');
+  const loadingText = byId('loadingText');
+  const loadingPct = byId('loadingPct');
+  const progressBar = byId('progressBar');
+
+  const errorCard = byId('errorCard');
+  const errorMsg = byId('errorMsg');
+
+  const resultsCard = byId('resultsCard');
+  const summary = byId('summary');
+  const vulnList = byId('vulnList');
+
+   let progressTimer = null;
+   let abortController = null;
+   let currentScanId = null;
+
+  function isValidUrl(u) {
+    try {
+      const url = new URL(u);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch { return false; }
+  }
+
+   function showLoading(msg) {
+     loadingText.textContent = msg || 'Running SQLi scan…';
+     loadingCard.style.display = 'block';
+     let pct = 0;
+     progressBar.style.width = '0%';
+     loadingPct.textContent = '0%';
+     clearInterval(progressTimer);
+     progressTimer = setInterval(() => {
+       pct = Math.min(95, pct + Math.max(1, Math.round(Math.random() * 10)));
+       progressBar.style.width = pct + '%';
+       loadingPct.textContent = pct + '%';
+     }, 280);
+   }
+
+   function hideLoading() {
+     clearInterval(progressTimer);
+     progressTimer = null;
+     loadingCard.style.display = 'none';
+     progressBar.style.width = '0%';
+     loadingPct.textContent = '0%';
+   }
+
+  function showError(msg) {
+    errorMsg.textContent = msg || 'Unknown error';
+    errorCard.style.display = 'block';
+  }
+  function hideError() { errorCard.style.display = 'none'; }
+  function hideResults() { resultsCard.style.display = 'none'; }
+  function showResults() { resultsCard.style.display = 'block'; resultsCard.scrollIntoView({behavior:'smooth',block:'start'}); }
+
+   function sevClass(sev) {
+     const s = (sev || '').toString().toLowerCase();
+     if (s === 'critical' || s === 'high') return 'vuln-high';
+     if (s === 'medium') return 'vuln-medium';
+     if (s === 'low') return 'vuln-low';
+     return 'vuln-medium';
+   }
+
+   methodSelect.addEventListener('change', () => {
+     bodyGroup.style.display = methodSelect.value === 'POST' ? 'block' : 'none';
+   });
+
+   scanForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+    hideResults();
+
+    const url = byId('targetUrl').value.trim();
+    if (!isValidUrl(url)) {
+      showError('Please enter a valid URL starting with http:// or https://');
+      return;
+    }
+
+    const customPayloads = (byId('customSqlPayloads').value || '')
+      .split('\n').map(x => x.trim()).filter(Boolean);
+
+    const body = {
+      url,
+      safe_mode: byId('safeMode').value === 'true',
+      method: methodSelect.value,
+      timeout: parseInt(byId('timeout').value) || 10,
+      custom_payloads: customPayloads.length ? customPayloads : undefined,
+      body_template: methodSelect.value === 'POST' ? (byId('bodyTemplate').value || '') : undefined,
+    };
+
+     const stopOnFirst = !!byId('stopOnFirst').checked;
+     body.stop_on_first = stopOnFirst;
+
+     showLoading('Running SQL injection scan…');
+     abortController = new AbortController();
+     try {
+       const res = await fetch('/api/sqli/scan', {
+         method: 'POST',
+         headers: authHeaders(),
+         body: JSON.stringify(body),
+         signal: abortController.signal,
+       });
+       const data = await res.json();
+       if (data.data && data.data.scan_id) {
+         currentScanId = data.data.scan_id;
+       } else {
+         currentScanId = null;
+       }
+      if (!data.success) throw new Error(data.error || 'Scan failed');
+
+      const result = data.data;
+      const allVulns = result.vulnerabilities || [];
+
+      // If stop-on-first is enabled, keep one finding per parameter.
+      const vulns = stopOnFirst
+        ? (() => {
+            const seenParams = new Set();
+            return allVulns.filter(v => {
+              const key = (v && v.parameter != null) ? String(v.parameter) : '';
+              if (seenParams.has(key)) return false;
+              seenParams.add(key);
+              return true;
+            });
+          })()
+        : allVulns;
+      clearInterval(progressTimer);
+      progressBar.style.width = '100%';
+      loadingPct.textContent = '100%';
+
+      clearChildren(summary);
+      const summaryItem = el('div', { className: `result-item ${vulns.length ? 'vuln-high' : 'vuln-safe'}` });
+      summaryItem.appendChild(el('div', { className: 'result-title', text: 'Summary' }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Target: ${result.target || '—'}` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Total vulnerabilities: ${vulns.length}` }));
+
+      if (result.params_tested_count != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Parameters tested: ${String(result.params_tested_count)}` }));
+      }
+      if (result.safe_mode != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Safe mode: ${String(result.safe_mode)}` }));
+      }
+      if (result.stop_on_first != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Stop on first (per parameter): ${String(result.stop_on_first)}` }));
+      }
+      if (result.active_payloads_count != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Active payloads (this scan): ${String(result.active_payloads_count)}` }));
+      }
+      if (result.using_custom_payloads != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Custom payloads: ${String(result.using_custom_payloads)}` }));
+      }
+      if (result.payload_attempts != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Payload attempts: ${String(result.payload_attempts)}` }));
+      }
+      if (result.requests_made != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `HTTP requests made: ${String(result.requests_made)}` }));
+      }
+
+      if (result.scan_id != null) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Saved to Reports: Yes (scan_id: ${String(result.scan_id)})` }));
+      } else {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: 'Saved to Reports: No (log in first)' }));
+      }
+
+      const ts = el('div', { className: 'result-detail', text: `Timestamp: ${result.timestamp || '—'}` });
+      ts.style.color = 'var(--text-muted)';
+      summaryItem.appendChild(ts);
+      summary.appendChild(summaryItem);
+
+      clearChildren(vulnList);
+      if (!vulns.length) {
+        const item = el('div', { className: 'result-item vuln-safe' });
+        item.appendChild(el('div', { className: 'result-title', text: 'No SQLi detected' }));
+        item.appendChild(el('div', { className: 'result-detail', text: 'No vulnerabilities found for this target.' }));
+        vulnList.appendChild(item);
+      } else {
+        vulns.forEach((v, i) => {
+          const item = el('div', { className: `result-item ${sevClass(v.severity)}` });
+          item.appendChild(el('div', { className: 'result-title', text: `#${i + 1} ${v.type || 'SQL Injection'} - ${(v.severity || 'Medium').toString()}` }));
+          if (v.scan_type) {
+            item.appendChild(el('div', { className: 'result-detail', text: `Technique: ${(v.scan_type || '—').toString()}` }));
+          }
+          item.appendChild(el('div', { className: 'result-detail', text: `Parameter: ${(v.parameter || '—').toString()}` }));
+          item.appendChild(el('div', { className: 'result-detail', text: `Payload: ${(v.payload || '—').toString()}` }));
+          if (v.evidence) {
+            item.appendChild(el('div', { className: 'result-detail', text: `Evidence: ${(v.evidence || '').toString()}` }));
+          }
+          if (v.poc) {
+            item.appendChild(el('div', { className: 'result-detail', text: `PoC: ${(v.poc || '').toString()}` }));
+          }
+          vulnList.appendChild(item);
+        });
+      }
+
+      showResults();
+      showToast('SQL injection scan completed', 'success');
+     } catch (err) {
+       if (err.name === 'AbortError') {
+         console.log('Scan aborted by user');
+       } else {
+         showError(err.message || 'Could not connect to server');
+       }
+     } finally {
+       hideLoading();
+       abortController = null;
+       currentScanId = null;
+     }
+  });
+</script>
+</body>
+</html>

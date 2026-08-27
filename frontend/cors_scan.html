@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — CORS Tester</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="cors_scan">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>CORS Tester</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scan Configuration</div>
+      <form id="scanForm">
+        <div class="form-group">
+          <label>Target URL</label>
+          <input type="url" id="targetUrl" placeholder="https://example.com/api" required>
+        </div>
+        <button class="btn btn-primary" id="scanBtn" type="submit">Start Scan</button>
+      </form>
+    </div>
+
+    <div class="card" id="errorCard" style="display:none;">
+      <div class="card-title">Error</div>
+      <div class="result-item vuln-high">
+        <div class="result-title">Scan failed</div>
+        <div class="result-detail" id="errorMsg">—</div>
+      </div>
+    </div>
+
+    <div class="card" id="resultsCard" style="display:none;">
+      <div class="card-title">Results</div>
+      <div id="summary"></div>
+      <div class="results-section" id="details"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const scanForm = $('scanForm');
+  const scanBtn = $('scanBtn');
+  const errorCard = $('errorCard');
+  const errorMsg = $('errorMsg');
+  const resultsCard = $('resultsCard');
+  const summary = $('summary');
+  const details = $('details');
+
+  let lastResult = null;
+
+  function setLoading(isLoading) {
+    if (!scanBtn) return;
+    scanBtn.disabled = !!isLoading;
+    scanBtn.classList.toggle('loading', !!isLoading);
+    scanBtn.textContent = isLoading ? 'Scanning…' : 'Start Scan';
+  }
+
+  function isValidUrl(u) {
+    try {
+      const url = new URL(u);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch { return false; }
+  }
+
+  function riskClass(risk) {
+    const r = (risk || '').toString().toUpperCase();
+    if (r === 'HIGH') return 'vuln-high';
+    if (r === 'MEDIUM') return 'vuln-medium';
+    return 'vuln-safe';
+  }
+
+  function asArray(v) {
+    if (!v) return [];
+    return Array.isArray(v) ? v : [v];
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg || 'Unknown error';
+    errorCard.style.display = 'block';
+  }
+  function hideError() { errorCard.style.display = 'none'; }
+
+  function addKeyValue(container, k, v) {
+    const line = el('div', { className: 'result-detail' });
+    line.appendChild(document.createTextNode(String(k) + ': '));
+    line.appendChild(el('span', { text: (v == null ? '—' : String(v)) }));
+    container.appendChild(line);
+  }
+
+  scanForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+    setLoading(true);
+
+    resultsCard.style.display = 'none';
+    clearChildren(summary);
+    clearChildren(details);
+
+    const url = $('targetUrl').value.trim();
+    if (!isValidUrl(url)) {
+      showError('Please enter a valid URL starting with http:// or https://');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/cors/scan', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Scan failed');
+
+      const result = data.data || {};
+      lastResult = result;
+      const risk = result.risk || 'LOW';
+
+      const summaryItem = el('div', { className: `result-item ${riskClass(risk)}` });
+      summaryItem.appendChild(el('div', { className: 'result-title', text: 'Summary' }));
+      addKeyValue(summaryItem, 'Target', result.url);
+      addKeyValue(summaryItem, 'Tested Origin', result.tested_origin);
+      addKeyValue(summaryItem, 'Risk', risk);
+      addKeyValue(summaryItem, 'Vulnerable', (result.vulnerable == null ? '—' : String(!!result.vulnerable)));
+      addKeyValue(summaryItem, 'Confidence', result.confidence || '—');
+      addKeyValue(summaryItem, 'Explanation', result.explanation || result.reason || '—');
+      addKeyValue(summaryItem, 'Recommendation', result.recommendation || '—');
+      addKeyValue(summaryItem, 'Impact (assessment)', result.impact || '—');
+      summary.appendChild(summaryItem);
+
+      // Evidence
+      const evObj = result.evidence;
+      const evLines = asArray(result.evidence_lines);
+      const legacyLines = Array.isArray(evObj) ? evObj : [];
+
+      const evItem = el('div', { className: 'result-item vuln-medium' });
+      evItem.appendChild(el('div', { className: 'result-title', text: 'Evidence' }));
+
+      if (evObj && !Array.isArray(evObj) && typeof evObj === 'object') {
+        addKeyValue(evItem, 'ACAO', evObj.acao || 'missing');
+        addKeyValue(evItem, 'ACAC', (evObj.acac || 'missing'));
+        addKeyValue(evItem, 'Reflection', (evObj.reflection == null ? '—' : String(!!evObj.reflection)));
+      }
+
+      const lines = [...legacyLines, ...evLines];
+      if (!lines.length) {
+        evItem.appendChild(el('div', { className: 'result-detail', text: 'No additional evidence provided.' }));
+      } else {
+        lines.forEach((line) => {
+          evItem.appendChild(el('div', { className: 'result-detail', text: String(line) }));
+        });
+      }
+      details.appendChild(evItem);
+
+      // Probes
+      const probes = result.probes || [];
+      if (probes.length) {
+        probes.forEach((p) => {
+          const item = el('div', { className: 'result-item vuln-safe' });
+          item.appendChild(el('div', { className: 'result-title', text: `${(p.kind || 'probe').toString().toUpperCase()} Probe` }));
+          addKeyValue(item, 'HTTP', p.status_code);
+          addKeyValue(item, 'Origin', p.request_origin);
+
+          const rh = p.response_headers || {};
+          const keys = Object.keys(rh);
+          if (!keys.length) {
+            item.appendChild(el('div', { className: 'result-detail', text: 'No CORS headers observed.' }));
+          } else {
+            keys.forEach((k) => {
+              item.appendChild(el('div', { className: 'result-detail', text: `${k}: ${String(rh[k])}` }));
+            });
+          }
+          details.appendChild(item);
+        });
+      }
+
+      resultsCard.style.display = 'block';
+      resultsCard.scrollIntoView({behavior:'smooth',block:'start'});
+      showToast('CORS scan completed', 'success');
+    } catch (err) {
+      showError(err.message || 'Could not connect to server');
+    } finally {
+      setLoading(false);
+    }
+  });
+</script>
+</body>
+</html>

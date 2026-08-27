@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Admin Scans</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="stylesheet" href="assets/css/admin.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="admin-scans">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="admin-topbar">
+      <div>
+        <div class="admin-title">Global Scan Monitoring</div>
+        <div class="admin-subtitle">Live scans (all users) • stop requests supported</div>
+      </div>
+      <div class="admin-subtitle" id="scanMeta">Last refresh: —</div>
+    </div>
+
+    <div class="admin-grid-2">
+      <div class="admin-panel">
+        <div class="admin-panel-title"><span>Live + recent scans</span></div>
+
+        <div class="admin-toolbar">
+          <input id="q" type="text" placeholder="Search user/URL" style="min-width:260px;">
+          <select id="status">
+            <option value="">All status</option>
+            <option value="running">Running</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+          </select>
+          <select id="severity">
+            <option value="">All risk</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="info">Info</option>
+            <option value="clean">Clean</option>
+          </select>
+          <button class="btn btn-primary" id="refreshBtn" type="button">Refresh</button>
+        </div>
+
+        <div id="scansError" style="display:none; margin-top:12px;"></div>
+
+        <div class="admin-table-wrap">
+          <table class="table" style="min-width:1200px;">
+            <thead>
+              <tr>
+                <th>Scan ID</th>
+                <th>User</th>
+                <th>Target URL</th>
+                <th>Scanner type</th>
+                <th>Status</th>
+                <th>Stop</th>
+                <th>Started</th>
+              </tr>
+            </thead>
+            <tbody id="scansBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="admin-panel admin-right-pane">
+        <div class="admin-panel-title"><span>Scan details</span></div>
+        <div class="admin-panel-body" id="scanDetails">
+          <div class="result-item vuln-safe">
+            <div class="result-title">Select a scan</div>
+            <div class="result-detail">Click a scan row to view a readable summary, vulnerabilities, and raw JSON.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/admin_common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+
+  function asText(v) {
+    if (v === null || v === undefined) return '—';
+    if (Array.isArray(v)) return v.join(', ');
+    return String(v);
+  }
+
+  function normalizeSeverity(v) {
+    const s = (v || '').toString().trim();
+    return s ? s.toLowerCase() : '';
+  }
+
+  function badge(text, variant) {
+    return el('span', { className: `badge badge-${variant || 'muted'}`, text: String(text ?? '—') });
+  }
+
+  function severityVariant(sev) {
+    const s = (sev || '').toString().toLowerCase();
+    if (s === 'critical' || s === 'high') return 'danger';
+    if (s === 'medium') return 'warning';
+    if (s === 'low') return 'info';
+    if (s === 'clean') return 'success';
+    return 'muted';
+  }
+
+  function showErr(wrapId, msg) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'block';
+    const item = el('div', { className: 'result-item vuln-high' });
+    item.appendChild(el('div', { className: 'result-title', text: 'Request failed' }));
+    item.appendChild(el('div', { className: 'result-detail', text: msg || 'Unknown error' }));
+    wrap.replaceChildren(item);
+  }
+
+  function clearErr(wrapId) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'none';
+    wrap.replaceChildren();
+  }
+
+  async function loadScans() {
+    clearErr('scansError');
+    const q = (byId('q').value || '').trim();
+    const status = byId('status').value || '';
+    const severity = byId('severity').value || '';
+
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    if (status) qs.set('status', status);
+    if (severity) qs.set('severity', severity);
+
+    const res = await adminFetch('/api/admin/scans?' + qs.toString(), { method: 'GET' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+
+    const body = byId('scansBody');
+    clearChildren(body);
+
+    const rows = Array.isArray(data.scans) ? data.scans : [];
+
+    // Prioritize running scans at top.
+    rows.sort((a, b) => {
+      const ar = String((a && a.status) || '').toLowerCase() === 'running' ? 0 : 1;
+      const br = String((b && b.status) || '').toLowerCase() === 'running' ? 0 : 1;
+      if (ar !== br) return ar - br;
+      return Number((b && b.id) || 0) - Number((a && a.id) || 0);
+    });
+
+    for (const s of rows) {
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', () => loadScanDetail(s.id));
+
+      tr.appendChild(el('td', { text: s.id }));
+      tr.appendChild(el('td', { text: s.user || '—' }));
+      tr.appendChild(el('td', { text: s.target_url || '—' }));
+      tr.appendChild(el('td', { text: s.scanner_type || '—' }));
+
+      const stTd = document.createElement('td');
+      const st = (s.status || '—').toString().toLowerCase();
+      const stVar = st === 'running' ? 'warning' : (st === 'completed' ? 'success' : (st === 'failed' ? 'danger' : 'muted'));
+      const stLabel = (s.cancel_requested && st === 'running') ? 'STOP REQUESTED' : (s.status || '—').toString().toUpperCase();
+      stTd.appendChild(badge(stLabel, stVar));
+      tr.appendChild(stTd);
+
+      const stopTd = document.createElement('td');
+      stopTd.style.whiteSpace = 'nowrap';
+      if (st === 'running' && !s.cancel_requested) {
+        const stopBtn = el('button', { className: 'btn btn-secondary', text: 'Stop', attrs: { type: 'button' } });
+        stopBtn.addEventListener('click', async (e) => {
+          try {
+            e.stopPropagation();
+            if (!confirm('Request stop for this scan?')) return;
+            const res = await adminFetch('/api/admin/scans/' + s.id + '/stop', { method: 'POST', body: JSON.stringify({ reason: 'Stopped by admin' }) });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+            await loadScans();
+          } catch (err) {
+            showErr('scansError', (err && err.message) ? err.message : 'Failed');
+          }
+        });
+        stopTd.appendChild(stopBtn);
+      } else {
+        stopTd.appendChild(el('span', { className: 'result-detail', text: '—' }));
+      }
+      tr.appendChild(stopTd);
+
+      tr.appendChild(el('td', { text: s.timestamp || '—' }));
+
+      body.appendChild(tr);
+    }
+
+    const meta = byId('scanMeta');
+    if (meta) meta.textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
+  }
+
+  async function loadScanDetail(scanId) {
+    const wrap = byId('scanDetails');
+    const loading = el('div', { className: 'result-item vuln-medium' });
+    loading.appendChild(el('div', { className: 'result-title', text: 'Loading scan…' }));
+    loading.appendChild(el('div', { className: 'result-detail', text: 'Fetching stored scan results.' }));
+    wrap.replaceChildren(loading);
+
+    try {
+      const res = await adminFetch('/api/admin/scans/' + scanId, { method: 'GET' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+
+      const s = data.scan || {};
+
+      const results = (s && s.results && typeof s.results === 'object') ? s.results : {};
+    const vulns = Array.isArray(results.vulnerabilities) ? results.vulnerabilities : [];
+
+      const role = (s.role || '').toString().toLowerCase();
+    const roleLabel = role ? role.toUpperCase() : '—';
+    const roleBadgeVariant = role === 'admin' ? 'danger' : (role === 'user' ? 'info' : 'muted');
+
+      const meta = el('div', { className: 'result-item vuln-safe' });
+    meta.appendChild(el('div', { className: 'result-title', text: `Scan #${s.id || scanId}` }));
+    const who = el('div', { className: 'result-detail' });
+    who.appendChild(el('span', { text: `User: ${asText(s.user)} (${asText(s.email)}) • Role: ` }));
+    who.appendChild(badge(roleLabel, roleBadgeVariant));
+    meta.appendChild(who);
+    meta.appendChild(el('div', { className: 'result-detail', text: `Target: ${s.target_url || '—'}` }));
+    meta.appendChild(el('div', { className: 'result-detail', text: `Scan types: ${asText(s.scan_types)}` }));
+
+    const risk = normalizeSeverity(s.risk_level || 'info');
+    const riskRow = el('div', { className: 'result-detail' });
+    riskRow.appendChild(el('span', { text: 'Risk: ' }));
+    riskRow.appendChild(badge((risk || 'info').toUpperCase(), severityVariant(risk)));
+    riskRow.appendChild(el('span', { text: ` • Status: ${asText(s.status)}` }));
+    meta.appendChild(riskRow);
+
+    meta.appendChild(el('div', { className: 'result-detail', text: `Started: ${s.started_at || '—'} • Completed: ${s.completed_at || '—'}` }));
+
+    if (s.cancel_requested) {
+      meta.appendChild(el('div', { className: 'result-detail', text: `Stop requested: YES • Reason: ${asText(s.cancel_reason)} • Canceled at: ${asText(s.canceled_at)}` }));
+    }
+
+    // Summary row (if present)
+    const summaryBits = [];
+    if (typeof results.duration_seconds === 'number') summaryBits.push(`Duration: ${results.duration_seconds.toFixed(2)}s`);
+    if (typeof results.requests_made === 'number') summaryBits.push(`Requests: ${results.requests_made}`);
+    if (typeof results.payload_attempts === 'number') summaryBits.push(`Payload attempts: ${results.payload_attempts}`);
+    if (typeof results.total_found === 'number') summaryBits.push(`Found: ${results.total_found}`);
+    if (summaryBits.length) {
+      meta.appendChild(el('div', { className: 'result-detail', text: summaryBits.join(' • ') }));
+    }
+
+      let vulnTableWrap = null;
+      if (vulns.length) {
+        vulnTableWrap = document.createElement('div');
+        vulnTableWrap.style.marginTop = '12px';
+
+        const title = el('div', { className: 'result-item vuln-safe' });
+        title.appendChild(el('div', { className: 'result-title', text: `Vulnerabilities (${vulns.length})` }));
+        title.appendChild(el('div', { className: 'result-detail', text: 'Extracted from the stored scan output.' }));
+        vulnTableWrap.appendChild(title);
+
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'admin-table-wrap';
+      tableWrap.style.marginTop = '8px';
+
+      const table = document.createElement('table');
+      table.className = 'table';
+      table.style.minWidth = '900px';
+
+      const thead = document.createElement('thead');
+      const hr = document.createElement('tr');
+      ['Type', 'Scan type', 'Severity', 'Parameter', 'Evidence', 'PoC'].forEach(h => hr.appendChild(el('th', { text: h })));
+      thead.appendChild(hr);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      for (const v of vulns) {
+        const tr = document.createElement('tr');
+        tr.appendChild(el('td', { text: asText(v.type) }));
+        tr.appendChild(el('td', { text: asText(v.scan_type) }));
+
+        const sev = normalizeSeverity(v.severity);
+        const sevTd = document.createElement('td');
+        sevTd.appendChild(badge((sev || 'info').toUpperCase(), severityVariant(sev)));
+        tr.appendChild(sevTd);
+
+        tr.appendChild(el('td', { text: asText(v.parameter) }));
+        tr.appendChild(el('td', { text: asText(v.evidence) }));
+
+        const pocTd = document.createElement('td');
+        const poc = (v.poc || '').toString();
+        if (poc) {
+          const a = document.createElement('a');
+          a.href = poc;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = 'Open';
+          pocTd.appendChild(a);
+        } else {
+          pocTd.textContent = '—';
+        }
+        tr.appendChild(pocTd);
+
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+        vulnTableWrap.appendChild(tableWrap);
+      }
+
+      const rawDetails = document.createElement('details');
+      rawDetails.style.marginTop = '12px';
+      const rawSummary = document.createElement('summary');
+      rawSummary.textContent = 'Raw scan JSON';
+      rawSummary.style.cursor = 'pointer';
+      rawDetails.appendChild(rawSummary);
+
+      const pre = document.createElement('pre');
+      pre.style.whiteSpace = 'pre-wrap';
+      pre.style.wordBreak = 'break-word';
+      pre.style.marginTop = '10px';
+      pre.textContent = JSON.stringify(results || {}, null, 2);
+      rawDetails.appendChild(pre);
+
+      if (vulnTableWrap) {
+        wrap.replaceChildren(meta, vulnTableWrap, rawDetails);
+      } else {
+        wrap.replaceChildren(meta, rawDetails);
+      }
+    } catch (err) {
+      const item = el('div', { className: 'result-item vuln-high' });
+      item.appendChild(el('div', { className: 'result-title', text: 'Could not load scan details' }));
+      item.appendChild(el('div', { className: 'result-detail', text: (err && err.message) ? err.message : 'Request failed' }));
+      wrap.replaceChildren(item);
+    }
+  }
+
+  byId('refreshBtn').addEventListener('click', () => {
+    loadScans().catch(e => showErr('scansError', e && e.message ? e.message : 'Failed'));
+  });
+
+  byId('q').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadScans().catch(() => {});
+  });
+
+  (function init() {
+    loadScans().catch(e => showErr('scansError', e && e.message ? e.message : 'Could not connect to server'));
+
+    // Live monitoring refresh
+    setInterval(() => {
+      loadScans().catch(() => {});
+    }, 5000);
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Feedback</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="feedback">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>Feedback</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Submit Feedback</div>
+      <form id="fbForm" class="form-lg" style="margin-top:12px;">
+        <div class="form-group">
+          <label>Category</label>
+          <select id="fbCategory" required>
+            <option value="bug">Bug</option>
+            <option value="feature">Feature Request</option>
+            <option value="false_positive">False Positive</option>
+            <option value="general" selected>General</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Subject</label>
+          <input id="fbSubject" type="text" maxlength="200" placeholder="Short summary" required>
+        </div>
+        <div class="form-group">
+          <label>Message</label>
+          <textarea id="fbMessage" placeholder="Describe the issue or suggestion…" style="min-height:120px;" required></textarea>
+        </div>
+        <div class="input-row" style="justify-content:flex-end; gap:10px;">
+          <button type="submit" class="btn btn-primary" id="fbSubmitBtn">Submit</button>
+        </div>
+      </form>
+      <div id="fbSubmitResult" style="display:none; margin-top:12px;"></div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="card-title">My Feedback</div>
+      <div id="fbError" style="display:none; margin-top:12px;"></div>
+      <div style="margin-top:12px; overflow:auto;">
+        <table class="table" style="min-width:900px;">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Subject</th>
+              <th>Status</th>
+              <th>Admin Reply</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="fbBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+
+  function showErr(wrapId, msg) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'block';
+    const item = el('div', { className: 'result-item vuln-high' });
+    item.appendChild(el('div', { className: 'result-title', text: 'Request failed' }));
+    item.appendChild(el('div', { className: 'result-detail', text: msg || 'Unknown error' }));
+    wrap.replaceChildren(item);
+  }
+
+  function clearErr(wrapId) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'none';
+    wrap.replaceChildren();
+  }
+
+  function badge(text, variant) {
+    return el('span', { className: `badge badge-${variant || 'muted'}`, text: String(text ?? '—') });
+  }
+
+  function statusVariant(status) {
+    const s = (status || '').toString().toLowerCase();
+    if (s === 'resolved') return 'success';
+    if (s === 'pending') return 'warning';
+    return 'muted';
+  }
+
+  async function loadMine() {
+    clearErr('fbError');
+    const res = await fetch('/api/feedback/mine', { method: 'GET', headers: authHeaders() });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+
+    const body = byId('fbBody');
+    clearChildren(body);
+
+    const rows = Array.isArray(data.feedback) ? data.feedback : [];
+    for (const f of rows) {
+      const tr = document.createElement('tr');
+      tr.appendChild(el('td', { text: (f.category || 'general').toString().replace('_',' ').toUpperCase() }));
+      tr.appendChild(el('td', { text: f.subject || '—' }));
+
+      const st = document.createElement('td');
+      st.appendChild(badge((f.status || 'pending').toString().toUpperCase(), statusVariant(f.status)));
+      tr.appendChild(st);
+
+      tr.appendChild(el('td', { text: f.admin_reply || '—' }));
+      tr.appendChild(el('td', { text: f.date || '—' }));
+      body.appendChild(tr);
+    }
+  }
+
+  byId('fbForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearErr('fbSubmitResult');
+    const btn = byId('fbSubmitBtn');
+    btn.disabled = true;
+    btn.classList.add('loading');
+
+    try {
+      const category = byId('fbCategory').value;
+      const subject = (byId('fbSubject').value || '').trim();
+      const message = (byId('fbMessage').value || '').trim();
+
+      const res = await fetch('/api/feedback/submit', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ category, subject, message })
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+
+      const wrap = byId('fbSubmitResult');
+      wrap.style.display = 'block';
+      const item = el('div', { className: 'result-item vuln-safe' });
+      item.appendChild(el('div', { className: 'result-title', text: 'Submitted' }));
+      item.appendChild(el('div', { className: 'result-detail', text: 'Thanks — your feedback was sent to the admin team.' }));
+      wrap.replaceChildren(item);
+
+      byId('fbSubject').value = '';
+      byId('fbMessage').value = '';
+
+      await loadMine();
+    } catch (err) {
+      showErr('fbSubmitResult', err && err.message ? err.message : 'Could not connect to server');
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('loading');
+    }
+  });
+
+  (function init() {
+    loadMine().catch(e => showErr('fbError', e && e.message ? e.message : 'Could not connect to server'));
+  })();
+</script>
+</body>
+</html>

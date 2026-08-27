@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Advanced Scan</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="advanced_scan">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>Advanced Scan</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scan Configuration</div>
+      <form id="scanForm">
+        <div class="form-group">
+          <label>Target URL</label>
+          <input type="url" id="targetUrl" placeholder="https://example.com">
+        </div>
+
+        <div class="form-group">
+          <label>URL List (Optional)</label>
+          <textarea id="targetUrls" rows="4" placeholder="One URL per line&#10;https://example.com&#10;https://example.org"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Scan Types</label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+            <label style="text-transform:none;letter-spacing:0;color:var(--text-primary);font-size:13px;"><input type="checkbox" class="scanType" value="xss" checked> XSS</label>
+            <label style="text-transform:none;letter-spacing:0;color:var(--text-primary);font-size:13px;"><input type="checkbox" class="scanType" value="sqli" checked> SQL Injection</label>
+            <label style="text-transform:none;letter-spacing:0;color:var(--text-primary);font-size:13px;"><input type="checkbox" class="scanType" value="headers" checked> Headers</label>
+            <label style="text-transform:none;letter-spacing:0;color:var(--text-primary);font-size:13px;"><input type="checkbox" class="scanType" value="open_redirect" checked> Open Redirect</label>
+            <label style="text-transform:none;letter-spacing:0;color:var(--text-primary);font-size:13px;"><input type="checkbox" class="scanType" value="cors" checked> CORS</label>
+            <label style="text-transform:none;letter-spacing:0;color:var(--text-primary);font-size:13px;"><input type="checkbox" class="scanType" value="phishing" checked> Phishing</label>
+          </div>
+        </div>
+
+        <div class="input-row">
+          <div class="form-group" style="flex:1;">
+            <label>HTTP Method</label>
+            <select id="httpMethod">
+              <option value="GET" selected>GET</option>
+              <option value="POST">POST</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Timeout (Seconds)</label>
+            <input type="text" id="timeout" value="10">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>SQLi Safe Mode</label>
+            <select id="safeMode">
+              <option value="true" selected>ON</option>
+              <option value="false">OFF</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="scanBtn">Run Advanced Scan</button>
+      </form>
+    </div>
+
+    <div class="card" id="errorCard" style="display:none;">
+      <div class="card-title">Error</div>
+      <div class="result-item vuln-high">
+        <div class="result-title">Scan failed</div>
+        <div class="result-detail" id="errorMsg">—</div>
+      </div>
+    </div>
+
+    <div class="card" id="resultsCard" style="display:none;">
+      <div class="card-title">Results</div>
+      <div id="summary"></div>
+      <div class="results-section" id="scanBreakdown"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const scanForm = $('scanForm');
+  const scanBtn = $('scanBtn');
+  const errorCard = $('errorCard');
+  const errorMsg = $('errorMsg');
+  const resultsCard = $('resultsCard');
+  const summary = $('summary');
+  const scanBreakdown = $('scanBreakdown');
+
+  let progressTimer = null;
+  let progressValue = 0;
+  let progressEls = { label: null, detail: null };
+
+  function stopProgress() {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+  }
+
+  function setProgress(pct) {
+    const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    progressValue = p;
+    if (progressEls.label) progressEls.label.textContent = `Scanning… ${p}%`;
+    if (progressEls.detail) progressEls.detail.textContent = `Running selected scanners. (${p}%)`;
+    if (scanBtn && scanBtn.disabled) scanBtn.textContent = `Scanning… ${p}%`;
+  }
+
+  function setLoading(isLoading) {
+    if (!scanBtn) return;
+    scanBtn.disabled = !!isLoading;
+    scanBtn.classList.toggle('loading', !!isLoading);
+    scanBtn.textContent = isLoading ? `Scanning… ${progressValue || 0}%` : 'Run Advanced Scan';
+  }
+
+  function parseUrlList(text) {
+    return (text || '')
+      .split(/[\n\r,]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
+  function isValidUrl(u) {
+    try {
+      const url = new URL(u);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch { return false; }
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg || 'Unknown error';
+    errorCard.style.display = 'block';
+  }
+  function hideError() { errorCard.style.display = 'none'; }
+
+  function sevClass(sev) {
+    const s = (sev || '').toString().toLowerCase();
+    if (s === 'critical' || s === 'high') return 'vuln-high';
+    if (s === 'medium') return 'vuln-medium';
+    if (s === 'low') return 'vuln-low';
+    return 'vuln-medium';
+  }
+
+  scanForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+    resultsCard.style.display = 'none';
+
+    stopProgress();
+    setProgress(0);
+    setLoading(true);
+
+    const singleUrl = $('targetUrl').value.trim();
+    const listRaw = $('targetUrls').value;
+    const listUrls = parseUrlList(listRaw);
+    const urls = listUrls.length ? listUrls : (singleUrl ? [singleUrl] : []);
+    if (!urls.length) {
+      showError('Enter a Target URL or provide a URL List.');
+      setLoading(false);
+      return;
+    }
+    if (urls.length > 50) {
+      showError('Please limit URL List to 50 URLs.');
+      setLoading(false);
+      return;
+    }
+    const invalid = urls.find(u => !isValidUrl(u));
+    if (invalid) {
+      showError(`Invalid URL detected: ${invalid}`);
+      setLoading(false);
+      return;
+    }
+
+    const scanTypes = Array.from(document.querySelectorAll('.scanType'))
+      .filter(cb => cb.checked)
+      .map(cb => cb.value);
+
+    if (!scanTypes.length) {
+      showError('Select at least one scan type.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      resultsCard.style.display = 'block';
+      clearChildren(summary);
+      clearChildren(scanBreakdown);
+
+      const loadingItem = el('div', { className: 'result-item vuln-medium' });
+      const titleEl = el('div', { className: 'result-title', text: 'Scanning… 0%' });
+      const detailEl = el('div', { className: 'result-detail', text: 'Running selected scanners. (0%)' });
+      loadingItem.appendChild(titleEl);
+      loadingItem.appendChild(detailEl);
+      summary.appendChild(loadingItem);
+      progressEls = { label: titleEl, detail: detailEl };
+
+      let grandTotal = 0;
+      const totalTargets = urls.length;
+
+      for (let i = 0; i < urls.length; i++) {
+        const target = urls[i];
+        // Progress segment for this target
+        const startPct = Math.floor((i / totalTargets) * 100);
+        const endPct = Math.floor(((i + 1) / totalTargets) * 100);
+        setProgress(startPct);
+
+        stopProgress();
+        progressTimer = setInterval(() => {
+          // Simulate within this segment, but never reach endPct until request completes.
+          const cap = Math.max(startPct, Math.min(99, endPct - 1));
+          if (progressValue >= cap) return;
+          const step = progressValue < (startPct + 20) ? 4 : 2;
+          setProgress(Math.min(cap, progressValue + step));
+        }, 250);
+
+        const body = {
+          url: target,
+          scan_types: scanTypes,
+          method: $('httpMethod').value,
+          options: {
+            timeout: parseInt($('timeout').value) || 10,
+            safe_mode: $('safeMode').value === 'true'
+          }
+        };
+
+        const res = await fetch('/api/scan/unified', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Scan failed');
+
+        stopProgress();
+        setProgress(endPct);
+
+        const total = data.total_vulnerabilities || 0;
+        grandTotal += total;
+
+        // Update summary
+        clearChildren(summary);
+        const summaryItem = el('div', { className: `result-item ${grandTotal ? 'vuln-high' : 'vuln-safe'}` });
+        summaryItem.appendChild(el('div', { className: 'result-title', text: 'Summary' }));
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Targets: ${totalTargets}` }));
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Completed: ${i + 1}/${totalTargets}` }));
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Scan types: ${(scanTypes || []).join(', ') || '—'}` }));
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Total vulnerabilities (all targets): ${grandTotal}` }));
+        summary.appendChild(summaryItem);
+
+        // Render per-target results block
+        const targetBlock = el('div', { className: `result-item ${total ? 'vuln-medium' : 'vuln-safe'}` });
+        targetBlock.appendChild(el('div', { className: 'result-title', text: `TARGET ${i + 1}/${totalTargets}` }));
+        targetBlock.appendChild(el('div', { className: 'result-detail', text: `${data.target || target}` }));
+        targetBlock.appendChild(el('div', { className: 'result-detail', text: `Total vulnerabilities: ${total}` }));
+        if (data.scan_id) {
+          targetBlock.appendChild(el('div', { className: 'result-detail', text: `Saved Scan ID: ${String(data.scan_id)}` }));
+        }
+        if (data.warning) {
+          targetBlock.appendChild(el('div', { className: 'result-detail', text: `Warning: ${String(data.warning)}` }));
+        }
+
+        const scans = data.scans || {};
+        const scanNames = Object.keys(scans);
+        if (scanNames.length) {
+          const inner = el('div', { className: 'result-detail' });
+          inner.style.marginTop = '8px';
+          for (const name of scanNames) {
+            const s = scans[name] || {};
+            const count = s.total_found ?? s.total_vulnerabilities ?? 0;
+            const block = el('div', { className: `result-item ${count ? 'vuln-medium' : 'vuln-safe'}` });
+            block.style.marginTop = '8px';
+            block.appendChild(el('div', { className: 'result-title', text: name.toUpperCase() }));
+
+            if (name === 'cors') {
+              const risk = (s.risk || '—').toString();
+              const conf = (s.confidence || '—').toString();
+              block.className = `result-item ${risk === 'HIGH' ? 'vuln-high' : (risk === 'MEDIUM' ? 'vuln-medium' : 'vuln-safe')}`;
+              block.appendChild(el('div', { className: 'result-detail', text: `Risk: ${risk} (confidence: ${conf})` }));
+              if (s.reason) {
+                block.appendChild(el('div', { className: 'result-detail', text: `Reason: ${String(s.reason)}` }));
+              }
+              if (Array.isArray(s.evidence) && s.evidence.length) {
+                const ev = s.evidence.slice(0, 2).map(x => String(x)).join(' • ');
+                block.appendChild(el('div', { className: 'result-detail', text: `Evidence: ${ev}` }));
+              }
+            } else {
+              block.appendChild(el('div', { className: 'result-detail', text: `Findings: ${count}` }));
+            }
+            if (s.inconclusive) {
+              block.appendChild(el('div', { className: 'result-detail', text: `Inconclusive: ${s.inconclusive_reason || 'Blocked/redirected response.'}` }));
+              if (s.final_url) {
+                block.appendChild(el('div', { className: 'result-detail', text: `Final URL: ${String(s.final_url)}` }));
+              }
+            }
+            if (s.grade) {
+              block.appendChild(el('div', { className: 'result-detail', text: `Grade: ${String(s.grade)}` }));
+            }
+
+            if (Array.isArray(s.vulnerabilities) && s.vulnerabilities.length) {
+              const listWrap = el('div', { className: 'result-detail' });
+              listWrap.style.marginTop = '8px';
+              for (const v of s.vulnerabilities.slice(0, 5)) {
+                const vItem = el('div', { className: `result-item ${sevClass(v.severity)}` });
+                vItem.style.marginTop = '8px';
+                vItem.appendChild(el('div', { className: 'result-title', text: `${v.type || name} - ${(v.severity || 'Medium').toString()}` }));
+                vItem.appendChild(el('div', { className: 'result-detail', text: (v.evidence || v.payload || v.parameter || '').toString() }));
+                listWrap.appendChild(vItem);
+              }
+              block.appendChild(listWrap);
+            }
+
+            inner.appendChild(block);
+          }
+          targetBlock.appendChild(inner);
+        }
+
+        scanBreakdown.appendChild(targetBlock);
+      }
+
+      setProgress(100);
+      stopProgress();
+
+      resultsCard.style.display = 'block';
+      resultsCard.scrollIntoView({behavior:'smooth',block:'start'});
+      showToast('Advanced scan completed', 'success');
+    } catch (err) {
+      stopProgress();
+      showError(err.message || 'Could not connect to server');
+    } finally {
+      stopProgress();
+      setLoading(false);
+    }
+  });
+</script>
+</body>
+</html>

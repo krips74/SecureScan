@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Reports</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="reports">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>Reports</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scan History</div>
+      <div id="historyWrap">
+        <div class="empty-state"><p>No scans yet.</p></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  let selectedScanIds = new Set();
+  let lastRenderedScanIds = [];
+  let expandedScanId = null;
+  const scanDetailsCache = new Map();
+
+  function updateBulkButtons() {
+    const btnSel = document.getElementById('deleteSelectedBtn');
+    if (btnSel) btnSel.disabled = selectedScanIds.size === 0;
+
+    const countEl = document.getElementById('selectedCount');
+    if (countEl) countEl.textContent = String(selectedScanIds.size);
+
+    const selAll = document.getElementById('selectAll');
+    if (selAll) {
+      const allSelected = lastRenderedScanIds.length > 0 && lastRenderedScanIds.every(id => selectedScanIds.has(id));
+      const noneSelected = lastRenderedScanIds.every(id => !selectedScanIds.has(id));
+      selAll.checked = allSelected;
+      selAll.indeterminate = !allSelected && !noneSelected;
+    }
+  }
+
+  async function deleteSelectedScans() {
+    const ids = Array.from(selectedScanIds);
+    if (!ids.length) return;
+    const ok = confirm(`Delete ${ids.length} selected scan(s)? This cannot be undone.`);
+    if (!ok) return;
+
+    try {
+      const res = await fetch('/api/scans/bulk-delete', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ scan_ids: ids })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Delete failed');
+      showToast(`Deleted ${data.deleted} scan(s)`, 'success');
+      selectedScanIds.clear();
+      await loadHistory();
+    } catch (err) {
+      showToast((err && err.message) ? err.message : 'Delete failed', 'error');
+    }
+  }
+
+  async function deleteScan(scanId) {
+    const id = Number(scanId);
+    if (!Number.isFinite(id)) {
+      showToast('Invalid scan id', 'error');
+      return;
+    }
+    const ok = confirm(`Delete scan #${id}? This cannot be undone.`);
+    if (!ok) return;
+
+    try {
+      const res = await fetch(`/api/scans/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Delete failed');
+      showToast('Scan deleted', 'success');
+      await loadHistory();
+    } catch (err) {
+      showToast((err && err.message) ? err.message : 'Delete failed', 'error');
+    }
+  }
+
+  async function loadHistory() {
+    const wrap = document.getElementById('historyWrap');
+    try {
+      const res = await fetch('/api/scans/history', { headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Failed');
+
+      const scans = data.scans || [];
+      if (!scans.length) {
+        selectedScanIds.clear();
+        lastRenderedScanIds = [];
+        updateBulkButtons();
+        return;
+      }
+
+      clearChildren(wrap);
+
+      const actionsBar = el('div', { className: 'input-row' });
+      actionsBar.style.marginBottom = '10px';
+      actionsBar.appendChild(el('div', { className: 'result-detail', text: `Selected: ` }));
+      const count = el('span', { attrs: { id: 'selectedCount' }, text: String(selectedScanIds.size) });
+      count.style.color = 'var(--text-secondary)';
+      actionsBar.appendChild(count);
+
+      const spacer = el('div');
+      spacer.style.flex = '1';
+      actionsBar.appendChild(spacer);
+
+      const delSelectedBtn = el('button', { className: 'btn btn-danger', text: 'Delete', attrs: { type: 'button', id: 'deleteSelectedBtn' } });
+      delSelectedBtn.addEventListener('click', deleteSelectedScans);
+      actionsBar.appendChild(delSelectedBtn);
+
+      wrap.appendChild(actionsBar);
+
+      const table = el('table', { className: 'data-table' });
+      const thead = el('thead');
+      const headRow = el('tr');
+      const thSel = el('th');
+      const selectAll = el('input', { attrs: { type: 'checkbox', id: 'selectAll' } });
+      selectAll.addEventListener('change', (e) => {
+        const checked = !!e.target.checked;
+        for (const id of lastRenderedScanIds) {
+          if (checked) selectedScanIds.add(id);
+          else selectedScanIds.delete(id);
+        }
+        // Re-render is simplest to keep row checkboxes in sync
+        loadHistory();
+      });
+      thSel.appendChild(selectAll);
+      headRow.appendChild(thSel);
+
+      for (const h of ['Target', 'Scan Types', 'Severity', 'Vulns', 'Date', 'Actions']) {
+        headRow.appendChild(el('th', { text: h }));
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = el('tbody');
+      lastRenderedScanIds = scans.map(s => Number(s.id)).filter(x => Number.isFinite(x));
+      for (const s of scans) {
+        const tr = el('tr');
+
+        const sid = Number(s.id);
+        tr.dataset.scanId = String(sid);
+        const tdSel = el('td');
+        const cb = el('input', { attrs: { type: 'checkbox' } });
+        cb.checked = selectedScanIds.has(sid);
+        cb.addEventListener('change', (e) => {
+          if (e.target.checked) selectedScanIds.add(sid);
+          else selectedScanIds.delete(sid);
+          updateBulkButtons();
+        });
+        tdSel.appendChild(cb);
+        tr.appendChild(tdSel);
+
+        tr.appendChild(el('td', { className: 'url-cell', text: s.target_url || '—' }));
+
+        let typesText = '—';
+        try {
+          if (s.scan_types) {
+            const parsed = typeof s.scan_types === 'string' ? JSON.parse(s.scan_types) : s.scan_types;
+            if (Array.isArray(parsed)) typesText = parsed.join(', ');
+          }
+        } catch (e) {
+          typesText = '—';
+        }
+        tr.appendChild(el('td', { text: typesText }));
+
+        const tdSev = el('td');
+        tdSev.appendChild(severityBadgeEl(s.severity));
+        tr.appendChild(tdSev);
+
+        const tdV = el('td');
+        tdV.appendChild(badgeEl(String(s.total_vulns ?? 0), (s.total_vulns || 0) > 0 ? 'danger' : 'success'));
+        tr.appendChild(tdV);
+
+        const tdDate = el('td');
+        tdDate.style.color = 'var(--text-secondary)';
+        tdDate.style.fontSize = '12px';
+        tdDate.textContent = formatDate(s.started_at);
+        tr.appendChild(tdDate);
+
+        const tdActions = el('td');
+        const delBtn = el('button', { className: 'btn btn-danger', text: 'Delete', attrs: { type: 'button' } });
+        delBtn.addEventListener('click', () => deleteScan(s.id));
+        tdActions.appendChild(delBtn);
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+
+        if (expandedScanId && sid === expandedScanId) {
+          const detailsRow = buildDetailsRow(sid);
+          tbody.appendChild(detailsRow);
+        }
+      }
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+      updateBulkButtons();
+
+      tbody.addEventListener('click', onHistoryTableClick);
+
+      // Only load details after the table is attached to the DOM.
+      if (expandedScanId && Number.isFinite(expandedScanId)) {
+        void ensureDetailsLoaded(expandedScanId);
+      }
+    } catch (err) {
+      clearChildren(wrap);
+      const item = el('div', { className: 'result-item vuln-high' });
+      item.appendChild(el('div', { className: 'result-title', text: 'Could not load history' }));
+      item.appendChild(el('div', { className: 'result-detail', text: (err && err.message) ? err.message : 'Error' }));
+      wrap.appendChild(item);
+    }
+  }
+
+  function onHistoryTableClick(e) {
+    const t = e.target;
+    if (!t) return;
+
+    // Ignore clicks on interactive controls inside the row
+    if (t.closest('button') || (t.tagName === 'INPUT') || t.closest('label')) return;
+
+    const row = t.closest('tr');
+    if (!row) return;
+    if (row.classList.contains('report-details-row')) return;
+
+    const scanId = Number(row.dataset.scanId);
+    if (!Number.isFinite(scanId)) return;
+
+    if (expandedScanId === scanId) {
+      expandedScanId = null;
+      loadHistory();
+      return;
+    }
+
+    expandedScanId = scanId;
+    loadHistory();
+  }
+
+  function buildDetailsRow(scanId) {
+    const detailsRow = el('tr', { className: 'report-details-row' });
+    const td = el('td');
+    td.colSpan = 7;
+    td.style.paddingTop = '0px';
+
+    const holder = el('div', { attrs: { id: `scanDetails_${scanId}` } });
+    holder.style.padding = '12px 14px 16px 14px';
+    holder.appendChild(el('div', { className: 'result-item', }));
+    holder.firstChild.appendChild(el('div', { className: 'result-title', text: `Scan #${scanId} details` }));
+    holder.firstChild.appendChild(el('div', { className: 'result-detail', text: 'Loading…' }));
+    td.appendChild(holder);
+    detailsRow.appendChild(td);
+    return detailsRow;
+  }
+
+  async function ensureDetailsLoaded(scanId) {
+    if (scanDetailsCache.has(scanId)) {
+      renderDetails(scanId, scanDetailsCache.get(scanId));
+      return;
+    }
+
+    const holder = document.getElementById(`scanDetails_${scanId}`);
+    if (!holder) return;
+
+    try {
+      const res = await fetch(`/api/scans/${scanId}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Failed to load details');
+      scanDetailsCache.set(scanId, data.scan);
+      renderDetails(scanId, data.scan);
+    } catch (err) {
+      clearChildren(holder);
+      const item = el('div', { className: 'result-item vuln-high' });
+      item.appendChild(el('div', { className: 'result-title', text: `Scan #${scanId} details` }));
+      item.appendChild(el('div', { className: 'result-detail', text: (err && err.message) ? err.message : 'Failed to load details' }));
+      holder.appendChild(item);
+    }
+  }
+
+  function renderDetails(scanId, scan) {
+    const holder = document.getElementById(`scanDetails_${scanId}`);
+    if (!holder) return;
+    clearChildren(holder);
+
+    const results = scan && scan.results ? scan.results : null;
+
+    if (!results || typeof results !== 'object') {
+      const item = el('div', { className: 'result-item' });
+      item.appendChild(el('div', { className: 'result-title', text: 'Raw Results' }));
+      item.appendChild(el('div', { className: 'result-detail', text: results ? String(results) : 'No results available.' }));
+      holder.appendChild(item);
+      return;
+    }
+
+    const sections = extractScanSections(results, scan);
+    if (!sections.length) {
+      const item = el('div', { className: 'result-item' });
+      item.appendChild(el('div', { className: 'result-title', text: 'Raw Results' }));
+      const detail = el('div', { className: 'result-detail' });
+      detail.innerHTML = `<pre style="white-space: pre-wrap; word-break: break-word; margin:0;">${escapeHtml(JSON.stringify(results, null, 2))}</pre>`;
+      item.appendChild(detail);
+      holder.appendChild(item);
+      return;
+    }
+
+    for (const { name: scanName, result: scanResult } of sections) {
+      const totalFound = (scanResult && typeof scanResult === 'object') ? (scanResult.total_found ?? 0) : 0;
+      const item = el('div', { className: `result-item ${totalFound > 0 ? 'vuln-medium' : 'vuln-safe'}` });
+      item.appendChild(el('div', { className: 'result-title', text: `${String(scanName).toUpperCase()} — ${String(totalFound)} finding(s)` }));
+
+      const detail = el('div', { className: 'result-detail' });
+
+      // Prefer structured header-analysis output when available.
+      const structuredFindings = scanResult && Array.isArray(scanResult.findings) ? scanResult.findings : null;
+      const hasStructured = structuredFindings && structuredFindings.length && (scanResult.grade || scanResult.summary || scanResult.risk_explanation);
+      const isHeaders = String(scanName).toLowerCase() === 'headers' || (scanResult && scanResult.scan_type === 'headers');
+      if (isHeaders && hasStructured) {
+        const grade = scanResult.grade || '—';
+        const summary = scanResult.summary || {};
+        const riskExplanation = scanResult.risk_explanation || '';
+        const totalAll = (scanResult.total_findings != null) ? Number(scanResult.total_findings) : structuredFindings.length;
+
+        const headerLines = [];
+        headerLines.push(`Grade: ${escapeHtml(String(grade))}`);
+        headerLines.push(`Counts — HIGH: ${escapeHtml(String(summary.critical ?? 0))}, MEDIUM: ${escapeHtml(String(summary.medium ?? 0))}, LOW: ${escapeHtml(String(summary.low ?? 0))}, INFO: ${escapeHtml(String(summary.info ?? 0))}`);
+        headerLines.push(`Total (all findings): ${escapeHtml(String(totalAll))}`);
+        if (riskExplanation) headerLines.push(`Risk explanation: ${escapeHtml(String(riskExplanation))}`);
+
+        const findingLines = [];
+        for (const f of structuredFindings) {
+          if (!f || typeof f !== 'object') continue;
+          const h = f.header ? String(f.header) : 'Header';
+          const sev = f.severity ? String(f.severity) : 'INFO';
+          const reason = f.reason ? String(f.reason) : 'Finding';
+          const rec = f.recommendation ? String(f.recommendation) : '';
+          findingLines.push(`${escapeHtml(sev)} — ${escapeHtml(h)}: ${escapeHtml(reason)}${rec ? ` (Fix: ${escapeHtml(rec)})` : ''}`);
+        }
+
+        detail.innerHTML = headerLines.map(l => `<div>${l}</div>`).join('')
+          + (findingLines.length ? `<div style="margin-top:8px;">${findingLines.map(l => `<div>${l}</div>`).join('')}</div>` : '');
+
+        item.appendChild(detail);
+        holder.appendChild(item);
+        continue;
+      }
+
+      const vulns = scanResult && scanResult.vulnerabilities;
+      if (Array.isArray(vulns) && vulns.length) {
+        const lines = [];
+        for (const v of vulns) {
+          if (!v || typeof v !== 'object') continue;
+          const sev = v.severity ? String(v.severity) : 'info';
+          const p = v.parameter ? ` param=${String(v.parameter)}` : '';
+          const evidence = v.evidence ? String(v.evidence) : (v.description ? String(v.description) : 'Finding');
+          const poc = v.poc ? String(v.poc) : (v.url ? String(v.url) : '');
+          const payload = v.payload ? String(v.payload) : '';
+          lines.push(`${escapeHtml(sev)}: ${escapeHtml(evidence)}${poc ? ` (PoC: ${escapeHtml(poc)})` : ''}${payload ? ` (payload: ${escapeHtml(payload)})` : ''}${p ? ` (${escapeHtml(p.trim())})` : ''}`);
+        }
+        if (lines.length) {
+          detail.innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+        } else {
+          detail.textContent = 'Findings present but could not be rendered.';
+        }
+      } else {
+        detail.textContent = (scanResult && scanResult.success === false)
+          ? (scanResult.error ? `Error: ${scanResult.error}` : 'Scan failed')
+          : 'No findings.';
+      }
+
+      item.appendChild(detail);
+      holder.appendChild(item);
+    }
+  }
+
+  function extractScanSections(results, scan) {
+    if (!results || typeof results !== 'object') return [];
+
+    // Common unified shape: { scans: { xss: {...}, sqli: {...} } }
+    if (results.scans && typeof results.scans === 'object' && !Array.isArray(results.scans)) {
+      return Object.entries(results.scans).map(([k, v]) => ({ name: k, result: v }));
+    }
+
+    // Some scanners use: { scans: [ {...}, {...} ] }
+    if (Array.isArray(results.scans)) {
+      return results.scans.map((r, idx) => {
+        const name = (r && typeof r === 'object' && r.scan_type) ? String(r.scan_type) : `scan_${idx + 1}`;
+        return ({ name, result: r });
+      });
+    }
+
+    // Single-scan shape: { vulnerabilities: [...], total_found: N, ... }
+    // IMPORTANT: Do this BEFORE the knownKeys heuristic.
+    // Otherwise a header scan result (which includes a `headers: [...]` field)
+    // gets misinterpreted as a nested `headers` scan section.
+    if (Array.isArray(results.vulnerabilities) || results.total_found != null || results.success != null) {
+      let name = 'scan';
+      if (scan && Array.isArray(scan.scan_types) && scan.scan_types.length === 1) name = String(scan.scan_types[0]);
+      return [{ name, result: results }];
+    }
+
+    // Sometimes results are keyed by scan type directly (no `scans` wrapper)
+    const knownKeys = ['xss', 'sqli', 'headers', 'open_redirect', 'cors', 'phishing'];
+    const present = knownKeys.filter(k => {
+      const v = results[k];
+      if (!v || typeof v !== 'object') return false;
+      if (Array.isArray(v)) return false;
+      // Ensure it looks like a scan result, not a random field.
+      return (Array.isArray(v.vulnerabilities) || v.total_found != null || v.success != null || v.findings != null);
+    });
+    if (present.length) {
+      return present.map(k => ({ name: k, result: results[k] }));
+    }
+
+    // Nested envelope occasionally used: { results: {...} }
+    if (results.results && typeof results.results === 'object') {
+      return extractScanSections(results.results, scan);
+    }
+
+    return [];
+  }
+
+  function severityToVulnClass(sev) {
+    const v = (sev || '').toString().toLowerCase();
+    if (v === 'critical') return 'vuln-critical';
+    if (v === 'high') return 'vuln-high';
+    if (v === 'medium') return 'vuln-medium';
+    if (v === 'low') return 'vuln-low';
+    if (v === 'clean') return 'vuln-safe';
+    return 'vuln-safe';
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  loadHistory();
+</script>
+</body>
+</html>

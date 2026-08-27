@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Help</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="help">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>Help & Docs</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🚀 Getting Started</div>
+      <div class="result-item vuln-safe">
+        <div class="result-title">1) Configure</div>
+        <div class="result-detail">Set your MySQL + JWT settings in <code>.env</code> (project root).</div>
+      </div>
+      <div class="result-item vuln-safe">
+        <div class="result-title">2) Initialize Database</div>
+        <div class="result-detail">Run <code>schema.sql</code> to create tables in MySQL.</div>
+      </div>
+      <div class="result-item vuln-safe">
+        <div class="result-title">3) Sign In</div>
+        <div class="result-detail">Open <code>/login</code> and create an account if needed.</div>
+      </div>
+      <div class="result-item vuln-safe">
+        <div class="result-title">4) Run Scans</div>
+        <div class="result-detail">Use individual tools for focused scans, or <strong>Advanced Scan</strong> to run multi-tool scans and save results to the dashboard.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🔐 Notes</div>
+      <div class="result-item vuln-medium">
+        <div class="result-title">Authorization</div>
+        <div class="result-detail">All tool requests include your JWT via the <code>Authorization: Bearer</code> header. If your token expires, you’ll be redirected to login.</div>
+      </div>
+      <div class="result-item vuln-medium">
+        <div class="result-title">Scan History</div>
+        <div class="result-detail">Only <strong>Advanced Scan</strong> results are persisted to MySQL (via <code>/api/scan/unified</code>).</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+</body>
+</html>

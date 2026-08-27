@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Admin Users</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="stylesheet" href="assets/css/admin.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="admin-users">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="admin-topbar">
+      <div>
+        <div class="admin-title">User Management</div>
+        <div class="admin-subtitle">System-wide accounts • enforce access policy</div>
+      </div>
+      <div class="admin-subtitle" id="usersMeta">—</div>
+    </div>
+
+    <div class="admin-grid-2">
+      <div class="admin-panel">
+        <div class="admin-panel-title"><span>All users</span></div>
+
+        <div class="admin-toolbar">
+          <input id="q" type="text" placeholder="Search username/email" style="min-width:260px;">
+          <select id="status">
+            <option value="">All</option>
+            <option value="active">Active</option>
+            <option value="banned">Banned</option>
+          </select>
+          <select id="sortBy">
+            <option value="id" selected>Sort: User ID</option>
+            <option value="username">Sort: Username</option>
+            <option value="email">Sort: Email</option>
+            <option value="total_scans">Sort: Scans count</option>
+            <option value="last_active">Sort: Last active</option>
+            <option value="status">Sort: Status</option>
+          </select>
+          <select id="sortOrder">
+            <option value="desc" selected>Order: Desc</option>
+            <option value="asc">Order: Asc</option>
+          </select>
+          <button class="btn btn-primary" id="refreshBtn" type="button">Refresh</button>
+        </div>
+
+        <div id="usersError" style="display:none; margin-top:12px;"></div>
+
+        <div class="admin-table-wrap">
+          <table class="table" style="min-width:980px;">
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Scans</th>
+                <th>Last active</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="admin-panel admin-right-pane">
+        <div class="admin-panel-title"><span>User scan history</span></div>
+        <div class="admin-panel-body" id="userDetails">
+          <div class="result-item vuln-safe">
+            <div class="result-title">Select a user</div>
+            <div class="result-detail">Use “View” to load scan history.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/admin_common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+
+  function badge(text, variant) {
+    return el('span', { className: `badge badge-${variant || 'muted'}`, text: String(text ?? '—') });
+  }
+
+  function showErr(wrapId, msg) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'block';
+    const item = el('div', { className: 'result-item vuln-high' });
+    item.appendChild(el('div', { className: 'result-title', text: 'Request failed' }));
+    item.appendChild(el('div', { className: 'result-detail', text: msg || 'Unknown error' }));
+    wrap.replaceChildren(item);
+  }
+
+  function clearErr(wrapId) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'none';
+    wrap.replaceChildren();
+  }
+
+  async function loadUsers() {
+    clearErr('usersError');
+    const q = (byId('q').value || '').trim();
+    const status = byId('status').value || '';
+
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    if (status) qs.set('status', status);
+
+    const res = await adminFetch('/api/admin/users?' + qs.toString(), { method: 'GET' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+
+    const body = byId('usersBody');
+    clearChildren(body);
+
+    const rows = Array.isArray(data.users) ? data.users : [];
+    const sortBy = byId('sortBy').value || 'id';
+    const sortOrder = (byId('sortOrder').value || 'desc').toLowerCase();
+
+    rows.sort((a, b) => {
+      const av = a ? a[sortBy] : null;
+      const bv = b ? b[sortBy] : null;
+
+      const aNum = Number(av);
+      const bNum = Number(bv);
+      let cmp = 0;
+
+      if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && (sortBy === 'id' || sortBy === 'total_scans')) {
+        cmp = aNum - bNum;
+      } else {
+        cmp = String(av ?? '').localeCompare(String(bv ?? ''), undefined, { sensitivity: 'base' });
+      }
+
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+    for (const u of rows) {
+      const tr = document.createElement('tr');
+      tr.appendChild(el('td', { text: u.id }));
+      tr.appendChild(el('td', { text: u.username }));
+      tr.appendChild(el('td', { text: u.email }));
+      tr.appendChild(el('td', { text: u.total_scans }));
+      tr.appendChild(el('td', { text: u.last_active || '—' }));
+
+      const statusTd = document.createElement('td');
+      const isBanned = (u.status || '').toLowerCase() === 'banned';
+      statusTd.appendChild(badge(u.status || '—', isBanned ? 'danger' : 'success'));
+      tr.appendChild(statusTd);
+
+      const actions = document.createElement('td');
+      actions.style.whiteSpace = 'nowrap';
+
+      const viewBtn = el('button', { className: 'btn btn-secondary', text: 'View', attrs: { type: 'button' } });
+      viewBtn.addEventListener('click', () => loadUserDetail(u.id));
+
+      const banBtn = el('button', { className: 'btn btn-secondary', text: isBanned ? 'Unban' : 'Ban', attrs: { type: 'button', style: 'margin-left:8px;' } });
+      banBtn.addEventListener('click', () => banUser(u.id, !isBanned));
+
+      const delBtn = el('button', { className: 'btn btn-secondary', text: 'Delete', attrs: { type: 'button', style: 'margin-left:8px;' } });
+      delBtn.addEventListener('click', () => deleteUser(u.id));
+
+      actions.appendChild(viewBtn);
+      actions.appendChild(banBtn);
+      actions.appendChild(delBtn);
+      tr.appendChild(actions);
+
+      body.appendChild(tr);
+    }
+  }
+
+  async function loadUserDetail(userId) {
+    const wrap = byId('userDetails');
+    wrap.replaceChildren(el('div', { className: 'result-item vuln-medium', text: '' }));
+
+    const res = await adminFetch('/api/admin/users/' + userId, { method: 'GET' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+
+    const u = data.user || {};
+    const scans = Array.isArray(data.scans) ? data.scans : [];
+
+    const header = el('div', { className: 'result-item vuln-safe' });
+    header.appendChild(el('div', { className: 'result-title', text: `${u.username || 'User'} (ID: ${u.id})` }));
+    header.appendChild(el('div', { className: 'result-detail', text: `Email: ${u.email || '—'}` }));
+    header.appendChild(el('div', { className: 'result-detail', text: `Status: ${u.status || '—'}` }));
+    header.appendChild(el('div', { className: 'result-detail', text: `Last active: ${u.last_active || '—'}` }));
+
+    const tableWrap = el('div');
+    tableWrap.style.marginTop = '12px';
+    tableWrap.style.overflow = 'auto';
+
+    const table = document.createElement('table');
+    table.className = 'table';
+    table.style.minWidth = '820px';
+
+    const thead = document.createElement('thead');
+    thead.innerHTML = `<tr><th>Scan ID</th><th>Scan type</th><th>Target URL</th><th>Risk</th><th>Status</th><th>Timestamp</th></tr>`;
+
+    const tbody = document.createElement('tbody');
+    for (const s of scans) {
+      const tr = document.createElement('tr');
+      tr.appendChild(el('td', { text: s.id }));
+      tr.appendChild(el('td', { text: s.scan_types || s.scan_type || '—' }));
+      tr.appendChild(el('td', { text: s.target_url || '—' }));
+      tr.appendChild(el('td', { text: (s.risk_level || 'info').toString().toUpperCase() }));
+      tr.appendChild(el('td', { text: s.status || '—' }));
+      tr.appendChild(el('td', { text: s.timestamp || '—' }));
+      tbody.appendChild(tr);
+    }
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+
+    wrap.replaceChildren(header, tableWrap);
+  }
+
+  async function banUser(userId, banned) {
+    if (!confirm((banned ? 'Ban' : 'Unban') + ' this user?')) return;
+    const res = await adminFetch('/api/admin/users/' + userId + '/ban', { method: 'POST', body: JSON.stringify({ banned }) });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+    await loadUsers();
+  }
+
+  async function deleteUser(userId) {
+    if (!confirm('Delete this user and all their scans?')) return;
+    const res = await adminFetch('/api/admin/users/' + userId, { method: 'DELETE' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+    await loadUsers();
+    byId('userDetails').replaceChildren(el('div', { className: 'result-item vuln-safe', text: '' }));
+  }
+
+  byId('refreshBtn').addEventListener('click', () => {
+    loadUsers().catch(e => showErr('usersError', e && e.message ? e.message : 'Failed'));
+  });
+
+  byId('sortBy').addEventListener('change', () => loadUsers().catch(() => {}));
+  byId('sortOrder').addEventListener('change', () => loadUsers().catch(() => {}));
+
+  byId('q').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadUsers().catch(() => {});
+  });
+
+  (function init() {
+    // Lightweight system-wide meta for the control center header.
+    adminFetch('/api/admin/dashboard', { method: 'GET' }).then(r => r.json()).then(d => {
+      if (!d || d.success !== true) return;
+      const total = Number((d.stats || {}).total_users || 0);
+      const active = Number((d.stats || {}).active_users || 0);
+      const banned = Math.max(0, total - active);
+      const elMeta = byId('usersMeta');
+      if (elMeta) elMeta.textContent = `Total: ${total} • Active: ${active} • Banned: ${banned}`;
+    }).catch(() => {});
+
+    loadUsers().catch(e => showErr('usersError', e && e.message ? e.message : 'Could not connect to server'));
+  })();
+</script>
+</body>
+</html>

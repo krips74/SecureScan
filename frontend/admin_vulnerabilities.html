@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Admin Vulnerabilities</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="stylesheet" href="assets/css/admin.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="admin-vulnerabilities">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="admin-topbar">
+      <div>
+        <div class="admin-title">Global Vulnerability Dashboard</div>
+        <div class="admin-subtitle">All findings • triage false positives vs confirmed</div>
+      </div>
+      <div class="admin-subtitle" id="vulnMeta">—</div>
+    </div>
+
+    <div class="admin-grid-2">
+      <div class="admin-panel">
+        <div class="admin-panel-title"><span>All vulnerabilities</span></div>
+
+        <div class="admin-toolbar">
+          <input id="q" type="text" placeholder="Search user/URL/description" style="min-width:260px;">
+          <select id="severity">
+            <option value="">All severity</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="info">Info</option>
+          </select>
+          <select id="triage">
+            <option value="">All triage</option>
+            <option value="unreviewed">Unreviewed</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="false_positive">False positive</option>
+          </select>
+          <select id="vulnType">
+            <option value="">All scanner types</option>
+          </select>
+          <select id="bulkAction">
+            <option value="">Bulk action</option>
+            <option value="delete">Delete selected</option>
+            <option value="triage_confirmed">Mark confirmed</option>
+            <option value="triage_false_positive">Mark false positive</option>
+            <option value="triage_unreviewed">Reset to unreviewed</option>
+          </select>
+          <button class="btn btn-primary" id="applyBulkBtn" type="button">Apply</button>
+          <button class="btn btn-secondary" id="refreshBtn" type="button">Refresh</button>
+        </div>
+
+        <div id="vulnError" style="display:none; margin-top:12px;"></div>
+
+        <div class="admin-table-wrap">
+          <table class="table" style="min-width:1200px;">
+             <thead>
+               <tr>
+                 <th style="width:40px"><input type="checkbox" id="selectAll" title="Select all"></th>
+                 <th>ID</th>
+                 <th>Severity</th>
+                 <th>Scanner</th>
+                 <th>Triage</th>
+                 <th>User</th>
+                 <th>Target</th>
+                 <th>Found at</th>
+               </tr>
+             </thead>
+            <tbody id="vulnBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="admin-panel admin-right-pane">
+        <div class="admin-panel-title"><span>Finding details</span></div>
+        <div class="admin-panel-body" id="vulnDetails">
+          <div class="result-item vuln-safe">
+            <div class="result-title">Select a vulnerability</div>
+            <div class="result-detail">Click a row to triage it.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/admin_common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+
+  function badge(text, variant) {
+    return el('span', { className: `badge badge-${variant || 'muted'}`, text: String(text ?? '—') });
+  }
+
+  function severityVariant(sev) {
+    const s = (sev || '').toString().toLowerCase();
+    if (s === 'critical' || s === 'high') return 'danger';
+    if (s === 'medium') return 'warning';
+    if (s === 'low') return 'info';
+    return 'muted';
+  }
+
+  function triageVariant(v) {
+    const s = (v || '').toString().toLowerCase();
+    if (s === 'confirmed') return 'success';
+    if (s === 'false_positive') return 'danger';
+    if (s === 'unreviewed') return 'warning';
+    return 'muted';
+  }
+
+  function showErr(wrapId, msg) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'block';
+    const item = el('div', { className: 'result-item vuln-high' });
+    item.appendChild(el('div', { className: 'result-title', text: 'Request failed' }));
+    item.appendChild(el('div', { className: 'result-detail', text: msg || 'Unknown error' }));
+    wrap.replaceChildren(item);
+  }
+
+  function clearErr(wrapId) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'none';
+    wrap.replaceChildren();
+  }
+
+  let lastRows = [];
+  let selected = null;
+
+  function ensureTypeOptions(rows) {
+    const sel = byId('vulnType');
+    const current = sel.value || '';
+
+    const types = new Set();
+    for (const r of (rows || [])) {
+      const t = (r.vuln_type || '').toString().trim();
+      if (t) types.add(t);
+    }
+
+    const sorted = Array.from(types).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+    // rebuild options
+    sel.replaceChildren();
+    sel.appendChild(el('option', { attrs: { value: '' }, text: 'All scanner types' }));
+    for (const t of sorted) {
+      sel.appendChild(el('option', { attrs: { value: t.toLowerCase() }, text: t }));
+    }
+
+    // restore selection if possible
+    const has = Array.from(sel.options).some(o => o.value === current);
+    sel.value = has ? current : '';
+  }
+
+  function renderDetails(item) {
+    const wrap = byId('vulnDetails');
+    selected = item;
+
+    const card = el('div', { className: 'result-item vuln-safe' });
+    card.appendChild(el('div', { className: 'result-title', text: `Finding #${item.id} • ${(item.vuln_type || 'unknown').toString().toUpperCase()}` }));
+
+    const sevLine = el('div', { className: 'result-detail' });
+    sevLine.appendChild(document.createTextNode('Severity: '));
+    sevLine.appendChild(badge((item.severity || 'info').toString().toUpperCase(), severityVariant(item.severity)));
+
+    const triageLine = el('div', { className: 'result-detail' });
+    triageLine.appendChild(document.createTextNode('Triage: '));
+    triageLine.appendChild(badge((item.triage_status || 'unreviewed').toString().replace('_',' ').toUpperCase(), triageVariant(item.triage_status)));
+
+    card.appendChild(sevLine);
+    card.appendChild(triageLine);
+    card.appendChild(el('div', { className: 'result-detail', text: `User: ${item.user || '—'} (${item.email || '—'})` }));
+    card.appendChild(el('div', { className: 'result-detail', text: `Target: ${item.target_url || '—'}` }));
+    card.appendChild(el('div', { className: 'result-detail', text: `Finding URL: ${item.url || '—'}` }));
+    card.appendChild(el('div', { className: 'result-detail', text: `Parameter: ${item.parameter || '—'}` }));
+    card.appendChild(el('div', { className: 'result-detail', text: `Payload: ${item.payload || '—'}` }));
+    card.appendChild(el('div', { className: 'result-detail', text: `Description: ${item.description || '—'}` }));
+
+     const actions = el('div');
+     actions.style.marginTop = '12px';
+     actions.style.display = 'flex';
+     actions.style.gap = '10px';
+     actions.style.flexWrap = 'wrap';
+
+     const confirmBtn = el('button', { className: 'btn btn-primary', text: 'Mark Confirmed', attrs: { type: 'button' } });
+     confirmBtn.addEventListener('click', () => triage(item.id, 'confirmed'));
+
+     const fpBtn = el('button', { className: 'btn btn-secondary', text: 'Mark False Positive', attrs: { type: 'button' } });
+     fpBtn.addEventListener('click', () => triage(item.id, 'false_positive'));
+
+     const resetBtn = el('button', { className: 'btn btn-secondary', text: 'Reset to Unreviewed', attrs: { type: 'button' } });
+     resetBtn.addEventListener('click', () => triage(item.id, 'unreviewed'));
+
+     const deleteBtn = el('button', { className: 'btn btn-danger', text: 'Delete Vulnerability', attrs: { type: 'button' } });
+     deleteBtn.addEventListener('click', () => deleteVuln(item.id));
+
+     actions.appendChild(confirmBtn);
+     actions.appendChild(fpBtn);
+     actions.appendChild(resetBtn);
+     actions.appendChild(deleteBtn);
+
+    wrap.replaceChildren(card, actions);
+  }
+
+   async function triage(vulnId, status) {
+     try {
+       const res = await adminFetch('/api/admin/vulnerabilities/' + vulnId + '/triage', {
+         method: 'POST',
+         body: JSON.stringify({ status })
+       });
+       const data = await res.json().catch(() => null);
+       if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+       await loadVulns();
+     } catch (e) {
+       showErr('vulnError', e && e.message ? e.message : 'Failed');
+     }
+   }
+
+   async function deleteVuln(vulnId) {
+     if (!confirm('Are you sure you want to permanently delete this vulnerability?')) return;
+     try {
+       const res = await adminFetch('/api/admin/vulnerabilities/' + vulnId, {
+         method: 'DELETE'
+       });
+       const data = await res.json().catch(() => null);
+       if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed to delete');
+       selected = null;
+       await loadVulns();
+     } catch (e) {
+       showErr('vulnError', e && e.message ? e.message : 'Delete failed');
+     }
+   }
+
+  async function loadVulns() {
+    clearErr('vulnError');
+
+    const qs = new URLSearchParams();
+    const q = (byId('q').value || '').trim();
+    const severity = byId('severity').value || '';
+    const triage = byId('triage').value || '';
+    const vulnType = byId('vulnType').value || '';
+
+    if (q) qs.set('q', q);
+    if (severity) qs.set('severity', severity);
+    if (triage) qs.set('triage', triage);
+    if (vulnType) qs.set('vuln_type', vulnType);
+
+    const res = await adminFetch('/api/admin/vulnerabilities?' + qs.toString(), { method: 'GET' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+
+    const rows = Array.isArray(data.vulnerabilities) ? data.vulnerabilities : [];
+    lastRows = rows;
+
+    const meta = byId('vulnMeta');
+    if (meta) {
+      const unrev = rows.filter(r => String(r.triage_status || '').toLowerCase() === 'unreviewed').length;
+      meta.textContent = `Total: ${rows.length} • Unreviewed: ${unrev}`;
+    }
+
+    // populate scanner-type dropdown from returned data (only if no filter is set)
+    ensureTypeOptions(rows);
+
+    const body = byId('vulnBody');
+    clearChildren(body);
+
+     for (const v of rows) {
+       const tr = document.createElement('tr');
+       tr.style.cursor = 'pointer';
+       tr.addEventListener('click', (e) => {
+         // Don't select row if checkbox was clicked
+         if (e.target.type !== 'checkbox') {
+           renderDetails(v);
+         }
+       });
+
+       const cbTd = document.createElement('td');
+       const cb = el('input', { attrs: { type: 'checkbox', class: 'row-select' } });
+       cb.dataset.vulnId = v.id;
+       cbTd.appendChild(cb);
+       tr.appendChild(cbTd);
+
+       tr.appendChild(el('td', { text: v.id }));
+
+       const sevTd = document.createElement('td');
+       sevTd.appendChild(badge((v.severity || 'info').toString().toUpperCase(), severityVariant(v.severity)));
+       tr.appendChild(sevTd);
+
+       tr.appendChild(el('td', { text: v.vuln_type || '—' }));
+
+       const trTd = document.createElement('td');
+       trTd.appendChild(badge((v.triage_status || 'unreviewed').toString().replace('_',' ').toUpperCase(), triageVariant(v.triage_status)));
+       tr.appendChild(trTd);
+
+       tr.appendChild(el('td', { text: v.user || '—' }));
+       tr.appendChild(el('td', { text: v.target_url || '—' }));
+       tr.appendChild(el('td', { text: v.found_at || '—' }));
+
+       body.appendChild(tr);
+     }
+
+    // keep details synced if current selection is still present
+    if (selected) {
+      const updated = rows.find(r => r.id === selected.id);
+      if (updated) renderDetails(updated);
+    }
+  }
+
+   byId('refreshBtn').addEventListener('click', () => loadVulns().catch(e => showErr('vulnError', e && e.message ? e.message : 'Failed')));
+   byId('severity').addEventListener('change', () => loadVulns().catch(() => {}));
+   byId('triage').addEventListener('change', () => loadVulns().catch(() => {}));
+   byId('vulnType').addEventListener('change', () => loadVulns().catch(() => {}));
+
+   byId('q').addEventListener('keydown', (e) => {
+     if (e.key === 'Enter') loadVulns().catch(() => {});
+   });
+
+    // Select all checkbox
+    let selectAllState = false;
+    const selectAllCb = byId('selectAll');
+    selectAllCb.addEventListener('click', (e) => {
+      selectAllState = e.target.checked;
+      document.querySelectorAll('.row-select').forEach(cb => {
+        cb.checked = selectAllState;
+      });
+    });
+
+    // Update select all when individual checkboxes change
+    document.addEventListener('change', (e) => {
+      if (e.target.classList.contains('row-select')) {
+        const all = document.querySelectorAll('.row-select');
+        const checked = document.querySelectorAll('.row-select:checked');
+        selectAllCb.checked = all.length > 0 && all.length === checked.length;
+      }
+    });
+
+   // Bulk action
+   byId('applyBulkBtn').addEventListener('click', async () => {
+     const selectedIds = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.dataset.vulnId));
+     const action = byId('bulkAction').value;
+
+     if (selectedIds.length === 0) {
+       alert('Please select at least one vulnerability');
+       return;
+     }
+     if (!action) {
+       alert('Please select an action');
+       return;
+     }
+
+     if (action.startsWith('triage_')) {
+       const status = action.replace('triage_', '');
+       await bulkTriage(selectedIds, status);
+     } else if (action === 'delete') {
+       if (!confirm(`Delete ${selectedIds.length} vulnerability(ies) permanently?`)) return;
+       await bulkDelete(selectedIds);
+     }
+
+     byId('bulkAction').value = '';
+   });
+
+   async function bulkTriage(ids, status) {
+     try {
+       const res = await adminFetch('/api/admin/vulnerabilities/bulk/triage', {
+         method: 'POST',
+         body: JSON.stringify({ ids, status })
+       });
+       const data = await res.json().catch(() => null);
+       if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+       selected = null;
+       await loadVulns();
+     } catch (e) {
+       showErr('vulnError', e && e.message ? e.message : 'Failed');
+     }
+   }
+
+   async function bulkDelete(ids) {
+     try {
+       const res = await adminFetch('/api/admin/vulnerabilities/bulk/delete', {
+         method: 'POST',
+         body: JSON.stringify({ ids })
+       });
+       const data = await res.json().catch(() => null);
+       if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed to delete');
+       selected = null;
+       await loadVulns();
+     } catch (e) {
+       showErr('vulnError', e && e.message ? e.message : 'Delete failed');
+     }
+   }
+
+  (function init() {
+    loadVulns().catch(e => showErr('vulnError', e && e.message ? e.message : 'Could not connect to server'));
+  })();
+</script>
+</body>
+</html>

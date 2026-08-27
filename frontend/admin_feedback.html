@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Admin Feedback</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="stylesheet" href="assets/css/admin.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="admin-feedback">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="admin-topbar">
+      <div>
+        <div class="admin-title">Feedback Management</div>
+        <div class="admin-subtitle">All user feedback • reply / resolve / delete</div>
+      </div>
+      <div class="admin-subtitle" id="fbMeta">—</div>
+    </div>
+
+    <div class="admin-grid-2">
+      <div class="admin-panel">
+        <div class="admin-panel-title"><span>Inbox</span></div>
+
+        <div class="admin-toolbar">
+          <input id="q" type="text" placeholder="Search user/subject/message" style="min-width:260px;">
+          <select id="status">
+            <option value="">All status</option>
+            <option value="pending">Pending</option>
+            <option value="resolved">Resolved</option>
+          </select>
+          <select id="category">
+            <option value="">All categories</option>
+            <option value="bug">Bug</option>
+            <option value="feature">Feature Request</option>
+            <option value="false_positive">False Positive</option>
+            <option value="general">General</option>
+          </select>
+          <select id="sortBy">
+            <option value="date" selected>Sort: Date</option>
+            <option value="user">Sort: User</option>
+            <option value="category">Sort: Category</option>
+            <option value="status">Sort: Status</option>
+            <option value="subject">Sort: Subject</option>
+          </select>
+          <select id="sortOrder">
+            <option value="desc" selected>Order: Desc</option>
+            <option value="asc">Order: Asc</option>
+          </select>
+          <button class="btn btn-primary" id="refreshBtn" type="button">Refresh</button>
+        </div>
+
+        <div id="fbError" style="display:none; margin-top:12px;"></div>
+
+        <div class="admin-table-wrap">
+          <table class="table" style="min-width:1100px;">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Category</th>
+                <th>Subject</th>
+                <th>Message</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="fbBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="admin-panel admin-right-pane">
+        <div class="admin-panel-title"><span>Reply / resolve</span></div>
+        <div class="admin-panel-body" id="replyWrap">
+          <div class="result-item vuln-safe">
+            <div class="result-title">Select feedback</div>
+            <div class="result-detail">Click “Reply” to respond.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/admin_common.js"></script>
+<script>
+  const byId = (id) => document.getElementById(id);
+
+  function badge(text, variant) {
+    return el('span', { className: `badge badge-${variant || 'muted'}`, text: String(text ?? '—') });
+  }
+
+  function showErr(wrapId, msg) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'block';
+    const item = el('div', { className: 'result-item vuln-high' });
+    item.appendChild(el('div', { className: 'result-title', text: 'Request failed' }));
+    item.appendChild(el('div', { className: 'result-detail', text: msg || 'Unknown error' }));
+    wrap.replaceChildren(item);
+  }
+
+  function clearErr(wrapId) {
+    const wrap = byId(wrapId);
+    wrap.style.display = 'none';
+    wrap.replaceChildren();
+  }
+
+  function statusVariant(status) {
+    const s = (status || '').toString().toLowerCase();
+    if (s === 'resolved') return 'success';
+    if (s === 'pending') return 'warning';
+    return 'muted';
+  }
+
+  let selectedFeedback = null;
+
+  function renderReplyBox(item) {
+    const wrap = byId('replyWrap');
+    selectedFeedback = item;
+
+    const card = el('div', { className: 'result-item vuln-safe' });
+    card.appendChild(el('div', { className: 'result-title', text: `Reply to ${item.user || 'user'} (Feedback #${item.id})` }));
+    card.appendChild(el('div', { className: 'result-detail', text: `Subject: ${item.subject || '—'}` }));
+    card.appendChild(el('div', { className: 'result-detail', text: `Message: ${item.message || '—'}` }));
+
+    const ta = document.createElement('textarea');
+    ta.id = 'replyText';
+    ta.placeholder = 'Write your reply…';
+    ta.style.marginTop = '12px';
+    ta.style.width = '100%';
+    ta.style.minHeight = '120px';
+
+    const row = el('div');
+    row.style.marginTop = '12px';
+    row.style.display = 'flex';
+    row.style.gap = '10px';
+    row.style.flexWrap = 'wrap';
+
+    const sendBtn = el('button', { className: 'btn btn-primary', text: 'Send Reply', attrs: { type: 'button' } });
+    sendBtn.addEventListener('click', async () => {
+      const reply = (ta.value || '').trim();
+      if (!reply) return;
+      const res = await adminFetch('/api/admin/feedback/' + item.id + '/reply', { method: 'POST', body: JSON.stringify({ reply }) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+      await loadFeedback();
+    });
+
+    const resolveBtn = el('button', { className: 'btn btn-secondary', text: 'Mark Resolved', attrs: { type: 'button' } });
+    resolveBtn.addEventListener('click', async () => {
+      const res = await adminFetch('/api/admin/feedback/' + item.id + '/resolve', { method: 'POST' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+      await loadFeedback();
+    });
+
+    row.appendChild(sendBtn);
+    row.appendChild(resolveBtn);
+
+    wrap.replaceChildren(card, ta, row);
+  }
+
+  async function loadFeedback() {
+    clearErr('fbError');
+    const q = (byId('q').value || '').trim();
+    const status = byId('status').value || '';
+    const category = byId('category').value || '';
+
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    if (status) qs.set('status', status);
+    if (category) qs.set('category', category);
+
+    const res = await adminFetch('/api/admin/feedback?' + qs.toString(), { method: 'GET' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+
+    const body = byId('fbBody');
+    clearChildren(body);
+
+    const rows = Array.isArray(data.feedback) ? data.feedback : [];
+    try {
+      const total = rows.length;
+      const pending = rows.filter(r => String(r.status || '').toLowerCase() === 'pending').length;
+      const meta = byId('fbMeta');
+      if (meta) meta.textContent = `Total: ${total} • Pending: ${pending}`;
+    } catch (e) {}
+    const sortBy = byId('sortBy').value || 'date';
+    const sortOrder = (byId('sortOrder').value || 'desc').toLowerCase();
+
+    rows.sort((a, b) => {
+      const av = a ? a[sortBy] : null;
+      const bv = b ? b[sortBy] : null;
+      const cmp = String(av ?? '').localeCompare(String(bv ?? ''), undefined, { sensitivity: 'base' });
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+    for (const f of rows) {
+      const tr = document.createElement('tr');
+      tr.appendChild(el('td', { text: f.user || '—' }));
+      tr.appendChild(el('td', { text: (f.category || 'general').toString().replace('_',' ').toUpperCase() }));
+      tr.appendChild(el('td', { text: f.subject || '—' }));
+      tr.appendChild(el('td', { text: f.message || '—' }));
+
+      const st = document.createElement('td');
+      st.appendChild(badge((f.status || 'pending').toString().toUpperCase(), statusVariant(f.status)));
+      tr.appendChild(st);
+
+      tr.appendChild(el('td', { text: f.date || '—' }));
+
+      const actions = document.createElement('td');
+      actions.style.whiteSpace = 'nowrap';
+
+      const replyBtn = el('button', { className: 'btn btn-secondary', text: 'Reply', attrs: { type: 'button' } });
+      replyBtn.addEventListener('click', () => renderReplyBox(f));
+
+      const delBtn = el('button', { className: 'btn btn-secondary', text: 'Delete', attrs: { type: 'button', style: 'margin-left:8px;' } });
+      delBtn.addEventListener('click', async () => {
+        if (!confirm('Delete this feedback?')) return;
+        const res = await adminFetch('/api/admin/feedback/' + f.id, { method: 'DELETE' });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || data.success !== true) throw new Error((data && data.error) ? data.error : 'Failed');
+        await loadFeedback();
+      });
+
+      actions.appendChild(replyBtn);
+      actions.appendChild(delBtn);
+      tr.appendChild(actions);
+
+      body.appendChild(tr);
+    }
+
+    if (selectedFeedback) {
+      const updated = rows.find(r => r.id === selectedFeedback.id);
+      if (updated) renderReplyBox(updated);
+    }
+  }
+
+  byId('refreshBtn').addEventListener('click', () => {
+    loadFeedback().catch(e => showErr('fbError', e && e.message ? e.message : 'Failed'));
+  });
+
+  byId('sortBy').addEventListener('change', () => loadFeedback().catch(() => {}));
+  byId('sortOrder').addEventListener('change', () => loadFeedback().catch(() => {}));
+
+  byId('q').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadFeedback().catch(() => {});
+  });
+
+  (function init() {
+    loadFeedback().catch(e => showErr('fbError', e && e.message ? e.message : 'Could not connect to server'));
+  })();
+</script>
+</body>
+</html>

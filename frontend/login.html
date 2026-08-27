@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Login</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-card auth-card-enter">
+    <div class="auth-logo">
+      <a class="auth-brand" href="/home">
+        <div class="logo-icon"><img src="assets/images/logo.svg" alt="SecureScan"></div>
+        <h1>SecureScan</h1>
+      </a>
+    </div>
+    <div class="success-msg" id="okMsg"></div>
+    <div class="error-msg" id="errMsg"></div>
+
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="email">
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password">
+    </div>
+
+    <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px;" id="loginBtn" onclick="doLogin()">
+      Sign In
+    </button>
+
+    <div class="auth-link" style="margin-top:12px;">
+      <a href="/forgot_password">Forgot password?</a>
+    </div>
+
+    <div class="auth-link">
+      Don't have an account? <a href="/register">Create account</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Redirect if already logged in (user JWT)
+  if (localStorage.getItem('ss_token')) window.location.href = '/dashboard';
+
+  // If an admin session already exists, skip user login entirely.
+  (async function redirectIfAdminSession() {
+    try {
+      const res = await fetch('/api/admin/me', { method: 'GET', credentials: 'same-origin' });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && data.success) {
+        // Ensure no user JWT is left from a prior session.
+        localStorage.removeItem('ss_token');
+        localStorage.removeItem('ss_user');
+        localStorage.removeItem('ss_email');
+        localStorage.removeItem('ss_role');
+        window.location.href = '/admin_dashboard';
+      }
+    } catch (e) {
+      // ignore
+    }
+  })();
+
+  (function showStatusFromQuery() {
+    const params = new URLSearchParams(window.location.search || '');
+    const verified = params.get('verified');
+    const checkEmail = params.get('check_email');
+
+    if (verified === '1') {
+      showOk('Email verified. You can sign in now.');
+    } else if (verified === '0') {
+      showErr('Verification link is invalid or expired.');
+    } else if (checkEmail === '1') {
+      showOk('Account created. Please check your email to verify before signing in.');
+    }
+  })();
+
+  async function doLogin() {
+    const btn = document.getElementById('loginBtn');
+    const err = document.getElementById('errMsg');
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+
+    if (!email || !password) {
+      showErr('Please fill in all fields'); return;
+    }
+
+    btn.classList.add('loading');
+    btn.disabled = true;
+    err.style.display = 'none';
+
+    try {
+      // 1) Try admin login first (uses secure session cookie)
+      const ares = await fetch('/api/admin/login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      const adata = await ares.json().catch(() => null);
+      if (ares.ok && adata && adata.success) {
+        // Ensure no user JWT is left from a prior session.
+        localStorage.removeItem('ss_token');
+        localStorage.removeItem('ss_user');
+        localStorage.removeItem('ss_email');
+        localStorage.removeItem('ss_role');
+        window.location.href = '/admin_dashboard';
+        return;
+      }
+
+      // 2) Fall back to normal user login (JWT)
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data && data.success) {
+        // Defense-in-depth: do not persist admin role as a user JWT.
+        if ((data.role || '').toString().toLowerCase() === 'admin') {
+          showErr('Admin accounts must sign in via the admin portal.');
+          return;
+        }
+
+        localStorage.setItem('ss_token', data.token);
+        localStorage.setItem('ss_user', data.username);
+        localStorage.setItem('ss_email', data.email || email);
+        localStorage.setItem('ss_role', data.role || 'user');
+        window.location.href = '/dashboard';
+        return;
+      }
+
+      showErr((data && data.error) ? data.error : 'Login failed');
+    } catch(e) {
+      showErr('Could not connect to server');
+    } finally {
+      btn.classList.remove('loading');
+      btn.disabled = false;
+    }
+  }
+
+  function showErr(msg) {
+    const err = document.getElementById('errMsg');
+    const ok = document.getElementById('okMsg');
+    if (ok) ok.style.display = 'none';
+    err.textContent = msg;
+    err.style.display = 'block';
+  }
+
+  function showOk(msg) {
+    const ok = document.getElementById('okMsg');
+    const err = document.getElementById('errMsg');
+    if (err) err.style.display = 'none';
+    ok.textContent = msg;
+    ok.style.display = 'block';
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+</script>
+</body>
+</html>

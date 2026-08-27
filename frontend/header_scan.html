@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureScan — Header Analysis</title>
+  <link rel="stylesheet" href="assets/css/main.css">
+  <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
+</head>
+<body data-page="header_scan">
+<div class="app-layout">
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <div class="page-header">
+      <h1>Header Analysis</h1>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scan Configuration</div>
+      <form id="scanForm">
+        <div class="form-group">
+          <label>Target URL</label>
+          <input type="url" id="targetUrl" placeholder="https://example.com" required>
+        </div>
+        <button class="btn btn-primary" id="scanBtn" type="submit">Start Scan</button>
+      </form>
+    </div>
+
+    <div class="card" id="errorCard" style="display:none;">
+      <div class="card-title">Error</div>
+      <div class="result-item vuln-high">
+        <div class="result-title">Scan failed</div>
+        <div class="result-detail" id="errorMsg">—</div>
+      </div>
+    </div>
+
+    <div class="card" id="resultsCard" style="display:none;">
+      <div class="card-title">Results</div>
+      <div id="summary"></div>
+      <div class="results-section" id="vulnList"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="assets/js/common.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const scanForm = $('scanForm');
+  const scanBtn = $('scanBtn');
+  const errorCard = $('errorCard');
+  const errorMsg = $('errorMsg');
+  const resultsCard = $('resultsCard');
+  const summary = $('summary');
+  const vulnList = $('vulnList');
+
+   let progressTimer = null;
+   let progressValue = 0;
+   let progressEls = { label: null, detail: null };
+   let abortController = null;
+   let currentScanId = null;
+
+  function stopProgress() {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+  }
+
+  function setProgress(pct) {
+    const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    progressValue = p;
+    if (progressEls.label) progressEls.label.textContent = `Scanning… ${p}%`;
+    if (progressEls.detail) progressEls.detail.textContent = `Fetching response headers and evaluating policy. (${p}%)`;
+    if (scanBtn && scanBtn.disabled) scanBtn.textContent = `Scanning… ${p}%`;
+  }
+
+  function startProgress() {
+    stopProgress();
+    progressValue = 1;
+    setProgress(progressValue);
+    progressTimer = setInterval(() => {
+      // Simulated progress: fast early, slow later; never reaches 100% until request finishes.
+      const cap = 95;
+      if (progressValue >= cap) return;
+      const step = progressValue < 40 ? 6 : progressValue < 70 ? 3 : 1;
+      setProgress(Math.min(cap, progressValue + step));
+    }, 250);
+  }
+
+   function setLoading(isLoading) {
+     if (!scanBtn) return;
+     scanBtn.disabled = !!isLoading;
+     scanBtn.classList.toggle('loading', !!isLoading);
+     scanBtn.textContent = isLoading ? `Scanning… ${progressValue || 0}%` : 'Start Scan';
+   }
+
+  function isValidUrl(u) {
+    try {
+      const url = new URL(u);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch { return false; }
+  }
+
+  function sevClass(sev) {
+    const s = (sev || '').toString().toLowerCase();
+    if (s === 'critical' || s === 'high') return 'vuln-high';
+    if (s === 'medium') return 'vuln-medium';
+    if (s === 'low') return 'vuln-low';
+    return 'vuln-medium';
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg || 'Unknown error';
+    errorCard.style.display = 'block';
+  }
+  function hideError() { errorCard.style.display = 'none'; }
+
+   scanForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideError();
+    setLoading(true);
+    resultsCard.style.display = 'block';
+
+    clearChildren(summary);
+    clearChildren(vulnList);
+    const loadingItem = el('div', { className: 'result-item vuln-medium' });
+    const titleEl = el('div', { className: 'result-title', text: 'Scanning… 0%' });
+    const detailEl = el('div', { className: 'result-detail', text: 'Fetching response headers and evaluating policy. (0%)' });
+    loadingItem.appendChild(titleEl);
+    loadingItem.appendChild(detailEl);
+    summary.appendChild(loadingItem);
+
+    progressEls = { label: titleEl, detail: detailEl };
+    setProgress(0);
+    startProgress();
+
+    const url = $('targetUrl').value.trim();
+    if (!isValidUrl(url)) {
+      showError('Please enter a valid URL starting with http:// or https://');
+      resultsCard.style.display = 'none';
+      setLoading(false);
+      return;
+    }
+
+     try {
+       abortController = new AbortController();
+       const res = await fetch('/api/headers/scan', {
+         method: 'POST',
+         headers: authHeaders(),
+         body: JSON.stringify({ url }),
+         signal: abortController.signal,
+       });
+       const data = await res.json();
+       if (data.data && data.data.scan_id) {
+         currentScanId = data.data.scan_id;
+       } else {
+         currentScanId = null;
+       }
+      if (!data.success) throw new Error(data.error || 'Scan failed');
+
+      setProgress(100);
+      stopProgress();
+
+      const result = data.data;
+      const vulns = result.vulnerabilities || [];
+      const grade = result.grade || '—';
+      const inconclusive = !!result.inconclusive;
+      const inconclusiveReason = result.inconclusive_reason || '';
+      const finalUrl = result.final_url || '';
+
+      clearChildren(summary);
+      const summaryItem = el('div', { className: `result-item ${(grade === 'A' || grade === 'B') ? 'vuln-safe' : 'vuln-medium'}` });
+      summaryItem.appendChild(el('div', { className: 'result-title', text: 'Summary' }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Target: ${result.target || '—'}` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Grade: ${grade}` }));
+      summaryItem.appendChild(el('div', { className: 'result-detail', text: `Total findings: ${vulns.length}` }));
+      if (result.scan_id) {
+        summaryItem.appendChild(el('div', { className: 'result-detail', text: `Saved Scan ID: ${String(result.scan_id)}` }));
+      }
+      summary.appendChild(summaryItem);
+
+      if (inconclusive) {
+        const warn = el('div', { className: 'result-item vuln-medium' });
+        warn.appendChild(el('div', { className: 'result-title', text: 'Scan inconclusive' }));
+        warn.appendChild(el('div', { className: 'result-detail', text: inconclusiveReason || 'The target blocked or altered the response during scanning.' }));
+        if (finalUrl) {
+          warn.appendChild(el('div', { className: 'result-detail', text: `Final URL: ${finalUrl}` }));
+        }
+        summary.appendChild(warn);
+      }
+
+      clearChildren(vulnList);
+      if (inconclusive) {
+        const item = el('div', { className: 'result-item vuln-medium' });
+        item.appendChild(el('div', { className: 'result-title', text: 'No results to analyze' }));
+        item.appendChild(el('div', { className: 'result-detail', text: 'Because the scan was inconclusive, header findings were not evaluated to avoid false positives.' }));
+        vulnList.appendChild(item);
+      } else if (!vulns.length) {
+        const item = el('div', { className: 'result-item vuln-safe' });
+        item.appendChild(el('div', { className: 'result-title', text: 'No header issues' }));
+        item.appendChild(el('div', { className: 'result-detail', text: 'No security header findings detected for this target.' }));
+        vulnList.appendChild(item);
+      } else {
+        vulns.forEach((v, i) => {
+          const item = el('div', { className: `result-item ${sevClass(v.severity)}` });
+          item.appendChild(el('div', { className: 'result-title', text: `#${i + 1} ${v.type || 'Header Issue'} - ${(v.severity || 'Medium').toString()}` }));
+          item.appendChild(el('div', { className: 'result-detail', text: `Header: ${(v.parameter || '—').toString()}` }));
+          item.appendChild(el('div', { className: 'result-detail', text: `Evidence: ${(v.evidence || '—').toString()}` }));
+          if (v.recommendation) {
+            item.appendChild(el('div', { className: 'result-detail', text: `Recommendation: ${(v.recommendation || '').toString()}` }));
+          }
+          vulnList.appendChild(item);
+        });
+      }
+
+      resultsCard.style.display = 'block';
+      resultsCard.scrollIntoView({behavior:'smooth',block:'start'});
+      showToast('Header analysis completed', 'success');
+     } catch (err) {
+       stopProgress();
+       if (err.name !== 'AbortError') {
+         showError(err.message || 'Could not connect to server');
+         resultsCard.style.display = 'none';
+       }
+     } finally {
+       stopProgress();
+       setLoading(false);
+       abortController = null;
+       currentScanId = null;
+     }
+  });
+</script>
+</body>
+</html>
